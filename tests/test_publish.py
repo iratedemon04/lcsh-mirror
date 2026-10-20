@@ -25,7 +25,7 @@ class PublishTests(unittest.TestCase):
 
     def make_release(self, date):
         pages = os.path.join(self.tmp.name, "pages-" + date)
-        harvest.fetch(pages, 0, get=Server(SH + [GF]), sleep=lambda s: None)
+        harvest.fetch(pages, Server())
         harvest.build(pages, self.release, date=date)
 
     def test_stage_writes_what_the_page_reads(self):

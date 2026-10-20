@@ -28,19 +28,21 @@ headings, which share LC's subject database, are left out.
 
 ```
 pip install -r requirements.txt
-python harvest.py               # a few hours; resumable, rerun to continue
+python harvest.py               # about two days; resumable, rerun to continue
 python load.py data/release/lcsh-YYYYMMDD.mrc   # optional: searchable SQLite
 python tui.py libel             # optional: terminal browser (Linux/macOS)
 python publish.py [user@host:/path/]   # optional: gzip + latest.json, then rsync
 ```
 
-`harvest.py` asks LC's SRU server (`lx2.loc.gov:210/SAF`) for 200 records at a time,
-one request at a time, and waits at least 3 seconds, or as long as the server took,
-before the next. Any error stops the run; nothing is hammered or retried in a loop.
-Please keep it that way: it's a shared public service.
+`harvest.py` is deliberately gentle with LC's SRU server (`lx2.loc.gov:210/SAF`):
+one request at a time, and after every answer it waits ten times as long as the
+server took (at least 5 seconds), so LC never spends more than a tenth of its time
+on it. It first splits the LCCN range into chunks of at most 2,000 records, so every
+request stays cheap. Any error, or any answer slower than 30 seconds, stops the run;
+rerun later and it resumes. A full harvest takes about two days. Please keep it that way: it's a shared public service.
 
-The build checks that every record SRU announced arrived and that the result set
-didn't change size during the harvest. If it did, rerun.
+The build checks, chunk by chunk, that every record SRU announced arrived and that
+no chunk changed size during the harvest. If one did, rerun.
 
 ## Licence
 

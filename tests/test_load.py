@@ -18,7 +18,7 @@ class LoadTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             old, harvest.PAGE = harvest.PAGE, 2
             try:
-                harvest.fetch(os.path.join(d, "pages"), 0, get=Server(SH + [GF]), sleep=lambda s: None)
+                harvest.fetch(os.path.join(d, "pages"), Server())
             finally:
                 harvest.PAGE = old
             harvest.build(os.path.join(d, "pages"), os.path.join(d, "release"), date="20261020")
