@@ -31,6 +31,7 @@ pip install -r requirements.txt
 python harvest.py               # a few hours; resumable, rerun to continue
 python load.py data/release/lcsh-YYYYMMDD.mrc   # optional: searchable SQLite
 python tui.py libel             # optional: terminal browser (Linux/macOS)
+python publish.py [user@host:/path/]   # optional: gzip + latest.json, then rsync
 ```
 
 `harvest.py` asks LC's SRU server (`lx2.loc.gov:210/SAF`) for 200 records at a time,
