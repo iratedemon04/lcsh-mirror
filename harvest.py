@@ -199,8 +199,7 @@ def fetch(c, data, getter=get, sleep=time.sleep):
             c.execute("INSERT OR REPLACE INTO gone VALUES(?,?,?)",
                       (id_, f"HTTP {status}" if status != 200 else "not a MARC record", changed[id_]))
             last_rec = {"id": id_, "heading": f"(skipped: HTTP {status})", "at": now()}
-        if i % 10 == 0 or i == len(ids) - 1:
-            p.write(state="fetching", done=i + 1, last=last_rec)
+        p.write(state="fetching", done=i + 1, last=last_rec)
     p.write(state="fetched", done=len(ids))
     return len(ids)
 

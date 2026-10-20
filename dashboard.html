@@ -56,13 +56,14 @@ function show(s) {
   var e = s.errors || [];
   document.getElementById("errors").innerHTML = e.length ? e.length + "<ul>" + e.slice().reverse().map(function (x) {
     return "<li>" + x.replace(/[&<>]/g, "") + "</li>"; }).join("") + "</ul>" : "0";
-  document.getElementById("updated").textContent = "updated " + mins + " min ago";
+  var secs = Math.round((Date.now() - new Date(s.updated)) / 1000);
+  document.getElementById("updated").textContent = "updated " + (secs < 120 ? secs + " s" : mins + " min") + " ago";
 }
 function load() {
   fetch("status.json?" + Date.now()).then(function (r) { return r.json(); }).then(show)
     .catch(function () { document.getElementById("state").textContent = "no status yet"; });
 }
-load(); setInterval(load, 30000);
+load(); setInterval(load, 3100);
 </script>
 </body>
 </html>
