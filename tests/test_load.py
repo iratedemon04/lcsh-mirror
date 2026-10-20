@@ -6,7 +6,7 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import harvest  # noqa: E402
 import load  # noqa: E402
-from tests.test_harvest import GF, SH, Server  # noqa: E402
+from tests.test_harvest import make_release  # noqa: E402
 
 # the query tui.find() runs
 FIND = ("SELECT f.lccn, r.heading FROM fts f JOIN records r USING(lccn) "
@@ -16,12 +16,7 @@ FIND = ("SELECT f.lccn, r.heading FROM fts f JOIN records r USING(lccn) "
 class LoadTests(unittest.TestCase):
     def test_release_becomes_searchable(self):
         with tempfile.TemporaryDirectory() as d:
-            old, harvest.PAGE = harvest.PAGE, 2
-            try:
-                harvest.fetch(os.path.join(d, "pages"), Server())
-            finally:
-                harvest.PAGE = old
-            harvest.build(os.path.join(d, "pages"), os.path.join(d, "release"), date="20261020")
+            make_release(d, "20261020")
             db = os.path.join(d, "lcsh.db")
             self.assertEqual(load.load(os.path.join(d, "release", "lcsh-20261020.mrc"), db), 3)
             c = load.connect(db)

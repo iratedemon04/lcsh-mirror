@@ -9,7 +9,7 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import harvest  # noqa: E402
 import publish  # noqa: E402
-from tests.test_harvest import GF, SH, Server  # noqa: E402
+from tests.test_harvest import make_release  # noqa: E402
 
 
 class PublishTests(unittest.TestCase):
@@ -17,16 +17,12 @@ class PublishTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.release = os.path.join(self.tmp.name, "release")
         self.out = os.path.join(self.tmp.name, "publish", "lcsh")
-        self.old, harvest.PAGE = harvest.PAGE, 2
 
     def tearDown(self):
-        harvest.PAGE = self.old
         self.tmp.cleanup()
 
     def make_release(self, date):
-        pages = os.path.join(self.tmp.name, "pages-" + date)
-        harvest.fetch(pages, Server())
-        harvest.build(pages, self.release, date=date)
+        make_release(self.tmp.name, date)
 
     def test_stage_writes_what_the_page_reads(self):
         self.make_release("20261024")
