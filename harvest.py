@@ -33,7 +33,7 @@ QUERY = 'bath.lccn="sh*"'             # every record with an sh LCCN
 PAGE = 200                            # records per request
 DELAY = 3.0                           # minimum seconds between requests
 TIMEOUT = 120
-UA = "lcsh-mirror/1.0 (+https://bibliotecaalonsocossio.com/authorities)"
+UA = "lcsh-mirror/1.0 (+https://bibliotecaalonsocossio.com/lcshmirror/)"
 
 NS = {"zs": "http://www.loc.gov/zing/srw/", "m": "http://www.loc.gov/MARC21/slim"}
 MARC_NS = "{http://www.loc.gov/MARC21/slim}"
