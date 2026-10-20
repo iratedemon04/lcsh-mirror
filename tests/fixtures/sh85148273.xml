@@ -1,0 +1,65 @@
+<marcxml:record xmlns:mets="http://www.loc.gov/METS/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:marcxml="http://www.loc.gov/MARC21/slim">
+  <marcxml:leader>00888cz  a2200265n  4500</marcxml:leader>
+  <marcxml:controlfield tag="001">sh85148273</marcxml:controlfield>
+  <marcxml:controlfield tag="003">DLC</marcxml:controlfield>
+  <marcxml:controlfield tag="005">20040524083042.0</marcxml:controlfield>
+  <marcxml:controlfield tag="008">860211i| anannbabn          |a ana      </marcxml:controlfield>
+  <marcxml:datafield tag="010" ind1=" " ind2=" ">
+    <marcxml:subfield code="a">sh 85148273 </marcxml:subfield>
+  </marcxml:datafield>
+  <marcxml:datafield tag="040" ind1=" " ind2=" ">
+    <marcxml:subfield code="a">DLC</marcxml:subfield>
+    <marcxml:subfield code="c">DLC</marcxml:subfield>
+    <marcxml:subfield code="d">DLC</marcxml:subfield>
+    <marcxml:subfield code="d">AuSU</marcxml:subfield>
+    <marcxml:subfield code="d">DLC</marcxml:subfield>
+  </marcxml:datafield>
+  <marcxml:datafield tag="053" ind1=" " ind2="0">
+    <marcxml:subfield code="a">D731</marcxml:subfield>
+    <marcxml:subfield code="b">D838</marcxml:subfield>
+  </marcxml:datafield>
+  <marcxml:datafield tag="150" ind1=" " ind2=" ">
+    <marcxml:subfield code="a">World War, 1939-1945</marcxml:subfield>
+  </marcxml:datafield>
+  <marcxml:datafield tag="450" ind1=" " ind2=" ">
+    <marcxml:subfield code="a">European War, 1939-1945</marcxml:subfield>
+  </marcxml:datafield>
+  <marcxml:datafield tag="450" ind1=" " ind2=" ">
+    <marcxml:subfield code="a">Second World War, 1939-1945</marcxml:subfield>
+  </marcxml:datafield>
+  <marcxml:datafield tag="450" ind1=" " ind2=" ">
+    <marcxml:subfield code="a">World War 2, 1939-1945</marcxml:subfield>
+  </marcxml:datafield>
+  <marcxml:datafield tag="450" ind1=" " ind2=" ">
+    <marcxml:subfield code="a">World War II, 1939-1945</marcxml:subfield>
+  </marcxml:datafield>
+  <marcxml:datafield tag="450" ind1=" " ind2=" ">
+    <marcxml:subfield code="a">World War Two, 1939-1945</marcxml:subfield>
+  </marcxml:datafield>
+  <marcxml:datafield tag="450" ind1=" " ind2=" ">
+    <marcxml:subfield code="a">WW II (World War, 1939-1945)</marcxml:subfield>
+  </marcxml:datafield>
+  <marcxml:datafield tag="450" ind1=" " ind2=" ">
+    <marcxml:subfield code="a">WWII (World War, 1939-1945)</marcxml:subfield>
+  </marcxml:datafield>
+  <marcxml:datafield tag="550" ind1=" " ind2=" ">
+    <marcxml:subfield code="w">g</marcxml:subfield>
+    <marcxml:subfield code="a">History, Modern</marcxml:subfield>
+    <marcxml:subfield code="y">20th century</marcxml:subfield>
+  </marcxml:datafield>
+  <marcxml:datafield tag="670" ind1=" " ind2=" ">
+    <marcxml:subfield code="a">Women's fiction of the Second World War, 1996.</marcxml:subfield>
+  </marcxml:datafield>
+  <marcxml:datafield tag="670" ind1=" " ind2=" ">
+    <marcxml:subfield code="a">LC database, May 7, 2004</marcxml:subfield>
+    <marcxml:subfield code="b">(titles: World War Two; World War 2; WW II)</marcxml:subfield>
+  </marcxml:datafield>
+  <marcxml:datafield tag="670" ind1=" " ind2=" ">
+    <marcxml:subfield code="a">Am. heritage dict.</marcxml:subfield>
+    <marcxml:subfield code="b">(WWII: abbr. World War II)</marcxml:subfield>
+  </marcxml:datafield>
+  <marcxml:datafield tag="681" ind1=" " ind2=" ">
+    <marcxml:subfield code="i">Example under reference from</marcxml:subfield>
+    <marcxml:subfield code="a">Wars</marcxml:subfield>
+  </marcxml:datafield>
+</marcxml:record>

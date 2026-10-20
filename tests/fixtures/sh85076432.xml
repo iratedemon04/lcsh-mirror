@@ -1,0 +1,39 @@
+<marcxml:record xmlns:mets="http://www.loc.gov/METS/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:marcxml="http://www.loc.gov/MARC21/slim">
+  <marcxml:leader>00435cz  a2200169n  4500</marcxml:leader>
+  <marcxml:controlfield tag="001">sh85076432</marcxml:controlfield>
+  <marcxml:controlfield tag="003">DLC</marcxml:controlfield>
+  <marcxml:controlfield tag="005">20160909085245.7</marcxml:controlfield>
+  <marcxml:controlfield tag="008">860211i| anannbabn          |a ana      </marcxml:controlfield>
+  <marcxml:datafield tag="010" ind1=" " ind2=" ">
+    <marcxml:subfield code="a">sh 85076432 </marcxml:subfield>
+    <marcxml:subfield code="z">sh 85123289 </marcxml:subfield>
+    <marcxml:subfield code="z">sh2013003075</marcxml:subfield>
+  </marcxml:datafield>
+  <marcxml:datafield tag="040" ind1=" " ind2=" ">
+    <marcxml:subfield code="a">DLC</marcxml:subfield>
+    <marcxml:subfield code="c">DLC</marcxml:subfield>
+    <marcxml:subfield code="d">DLC</marcxml:subfield>
+  </marcxml:datafield>
+  <marcxml:datafield tag="150" ind1=" " ind2=" ">
+    <marcxml:subfield code="a">Libel and slander</marcxml:subfield>
+  </marcxml:datafield>
+  <marcxml:datafield tag="450" ind1=" " ind2=" ">
+    <marcxml:subfield code="a">Calumny</marcxml:subfield>
+  </marcxml:datafield>
+  <marcxml:datafield tag="450" ind1=" " ind2=" ">
+    <marcxml:subfield code="a">Defamation</marcxml:subfield>
+  </marcxml:datafield>
+  <marcxml:datafield tag="450" ind1=" " ind2=" ">
+    <marcxml:subfield code="w">nne</marcxml:subfield>
+    <marcxml:subfield code="a">Libel and slander</marcxml:subfield>
+    <marcxml:subfield code="x">Law and legislation</marcxml:subfield>
+  </marcxml:datafield>
+  <marcxml:datafield tag="450" ind1=" " ind2=" ">
+    <marcxml:subfield code="w">nne</marcxml:subfield>
+    <marcxml:subfield code="a">Slander</marcxml:subfield>
+  </marcxml:datafield>
+  <marcxml:datafield tag="550" ind1=" " ind2=" ">
+    <marcxml:subfield code="w">g</marcxml:subfield>
+    <marcxml:subfield code="a">Torts</marcxml:subfield>
+  </marcxml:datafield>
+</marcxml:record>
