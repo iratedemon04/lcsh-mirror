@@ -51,6 +51,8 @@ class Site:
         s = self.script.get(id_)
         if isinstance(s, list):
             s = s.pop(0) if s else None
+        if isinstance(s, tuple):
+            return s
         if s is not None:
             return s, b""
         return (200, RECORDS[id_]) if id_ in RECORDS else (404, b"")
@@ -123,6 +125,12 @@ class FetchTests(Base):
         self.fetch(Site({"sh85076432": [503, 0]}))
         self.assertEqual(self.stored(), IDS)
         self.assertEqual(self.slept.count(harvest.PAUSE), 2)
+
+    def test_waits_out_a_network_outage_without_giving_up(self):
+        dns = (0, b"URLError(gaierror(-3, 'Temporary failure in name resolution'))")
+        self.fetch(Site({"sh85076432": [dns] * 10}))
+        self.assertEqual(self.stored(), IDS)
+        self.assertEqual(self.slept.count(harvest.PAUSE), 10)
 
     def test_persistent_server_errors_stop(self):
         with self.assertRaisesRegex(harvest.Stop, "still failing"):

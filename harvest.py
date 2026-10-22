@@ -124,6 +124,14 @@ def get(id_, opener=urllib.request.urlopen):
         return 0, repr(e).encode()
 
 
+OFFLINE = (b"name resolution", b"Name or service not known", b"Network is unreachable", b"No route to host")
+
+
+def offline(body):
+    """True when the failure is our own connection (no DNS, no route), not LC."""
+    return any(s in body for s in OFFLINE)
+
+
 def todo(c):
     """Headings that are new, or changed at LC since we fetched them."""
     return [r[0] for r in c.execute(
@@ -173,7 +181,8 @@ def fetch(c, data, getter=get, sleep=time.sleep):
     p.write()
     last = 0.0
     for i, id_ in enumerate(ids):
-        for attempt in range(RETRIES + 1):
+        attempt, offline_since = 0, None
+        while True:
             wait = DELAY - (time.monotonic() - last)
             if wait > 0:
                 sleep(wait)
@@ -181,11 +190,20 @@ def fetch(c, data, getter=get, sleep=time.sleep):
             status, body = getter(id_)
             if status == 200 or status in (403, 404, 410, 429):
                 break
+            if status == 0 and offline(body):
+                # our own internet/DNS is down: says nothing about LC, so just wait for it
+                if not offline_since:
+                    offline_since = now()
+                    p.error(f"{id_}: no network ({body.decode()[:60]}), waiting")
+                p.write(state=f"waiting for network since {offline_since}")
+                sleep(PAUSE)
+                continue
             p.error(f"{id_}: {'network ' + body.decode()[:80] if status == 0 else f'HTTP {status}'}")
             if attempt == RETRIES:
                 p.write(state="stopped")
                 raise Stop(f"{id_}: still failing after {RETRIES} retries (HTTP {status})")
-            p.write(state=f"paused after HTTP {status}, retry {attempt + 1}/{RETRIES}")
+            attempt += 1
+            p.write(state=f"paused after HTTP {status}, retry {attempt}/{RETRIES}")
             sleep(PAUSE)
         if status in (403, 429):
             p.error(f"{id_}: HTTP {status}: LC asks us to slow down")
