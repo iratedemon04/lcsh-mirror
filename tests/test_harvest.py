@@ -147,6 +147,15 @@ class FetchTests(Base):
         self.assertEqual(self.fetch(site), 1)
         self.assertEqual(site.calls, ["sh85148273"])
 
+    def test_dashboard_counts_all_time_across_restarts(self):
+        with self.assertRaises(harvest.Stop):
+            self.fetch(Site({"sh85076432": 429}))        # stops after 1 stored
+        with self.assertRaises(harvest.Stop):
+            self.fetch(Site({"sh85148273": 429}))        # restart: continues from 2 stored
+        with open(os.path.join(self.data, "dash", "status.json"), encoding="utf-8") as fh:
+            s = json.load(fh)
+        self.assertEqual((s["done"], s["total"]), (2, 1003))
+
     def test_dashboard_status_is_written(self):
         self.fetch()
         with open(os.path.join(self.data, "dash", "status.json"), encoding="utf-8") as fh:

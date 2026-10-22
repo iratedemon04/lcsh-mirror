@@ -21,6 +21,7 @@ How it works:
 Everything is kept in data/store.db (SQLite), so a stop never loses work.
 """
 import argparse
+import collections
 import csv
 import datetime as dt
 import gzip
@@ -148,21 +149,24 @@ def heading_of(xml):
 class Progress:
     """Writes data/dash/status.json for the dashboard and the health check."""
 
-    def __init__(self, data, total):
+    def __init__(self, data, total, done=0):
+        """total = every heading in the census; done = those already up to date (all time)."""
         self.path = os.path.join(data, "dash", "status.json")
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
         page = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashboard.html")
         if os.path.exists(page):
             shutil.copyfile(page, os.path.join(data, "dash", "index.html"))
-        self.s = {"state": "fetching", "started": now(), "total": total, "done": 0,
+        self.s = {"state": "fetching", "started": now(), "total": total, "done": done,
                   "errors": [], "last": None, "updated": now()}
-        self.t0 = time.time()
+        self.recent = collections.deque(maxlen=300)    # (time, done): rate from recent pace only
 
     def write(self, **kw):
         self.s.update(kw, updated=now())
-        el = time.time() - self.t0
-        if self.s["done"] and el > 0:
-            rate = self.s["done"] / el
+        if not self.recent or self.recent[-1][1] != self.s["done"]:
+            self.recent.append((time.time(), self.s["done"]))
+        (t0, d0), (t1, d1) = self.recent[0], self.recent[-1]
+        if d1 > d0 and t1 > t0:
+            rate = (d1 - d0) / (t1 - t0)
             self.s["per_hour"] = round(rate * 3600)
             left = (self.s["total"] - self.s["done"]) / rate
             self.s["eta"] = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=left)).strftime("%Y-%m-%dT%H:%MZ")
@@ -177,7 +181,9 @@ class Progress:
 def fetch(c, data, getter=get, sleep=time.sleep):
     ids = todo(c)
     changed = dict(c.execute("SELECT id, changed FROM census"))
-    p = Progress(data, len(ids))
+    total = len(changed)
+    base = total - len(ids)
+    p = Progress(data, total, base)
     p.write()
     last = 0.0
     for i, id_ in enumerate(ids):
@@ -217,8 +223,8 @@ def fetch(c, data, getter=get, sleep=time.sleep):
             c.execute("INSERT OR REPLACE INTO gone VALUES(?,?,?)",
                       (id_, f"HTTP {status}" if status != 200 else "not a MARC record", changed[id_]))
             last_rec = {"id": id_, "heading": f"(skipped: HTTP {status})", "at": now()}
-        p.write(state="fetching", done=i + 1, last=last_rec)
-    p.write(state="fetched", done=len(ids))
+        p.write(state="fetching", done=base + i + 1, last=last_rec)
+    p.write(state="fetched", done=total)
     return len(ids)
 
 
