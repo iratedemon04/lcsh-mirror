@@ -158,7 +158,7 @@ class Progress:
             shutil.copyfile(page, os.path.join(data, "dash", "index.html"))
         self.s = {"state": "fetching", "started": now(), "total": total, "done": done,
                   "errors": [], "last": None, "updated": now()}
-        self.recent = collections.deque(maxlen=300)    # (time, done): rate from recent pace only
+        self.recent = collections.deque(maxlen=3500)   # (time, done): ~3 h of recent pace, so a 5-min pause barely moves the ETA
 
     def write(self, **kw):
         self.s.update(kw, updated=now())
