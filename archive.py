@@ -15,6 +15,7 @@ import hashlib
 import json
 import os
 import sys
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "data", "publish", "lcsh")
@@ -51,18 +52,24 @@ def archived():
         return {line.strip() for line in fh if line.strip()}
 
 
-def verified(ia, item_id, files):
-    """True when archive.org lists every file with our SHA-1."""
-    item = ia.get_item(item_id)
-    remote = {f.get("name"): f.get("sha1") for f in item.files}
+def verified(ia, item_id, files, wait=3 * 3600, every=60, sleep=time.sleep):
+    """True once archive.org lists every file with our SHA-1. New uploads go through the
+    Archive's processing queue first, so keep checking (every minute, up to `wait` seconds)."""
+    local = {}
     for f in files:
         h = hashlib.sha1()
         with open(os.path.join(OUT, f["name"]), "rb") as fh:
             for chunk in iter(lambda: fh.read(1 << 20), b""):
                 h.update(chunk)
-        if remote.get(f["name"]) != h.hexdigest():
+        local[f["name"]] = h.hexdigest()
+    deadline = time.monotonic() + wait
+    while True:
+        remote = {f.get("name"): f.get("sha1") for f in ia.get_item(item_id).files}
+        if all(remote.get(n) == h for n, h in local.items()):
+            return True
+        if time.monotonic() >= deadline:
             return False
-    return True
+        sleep(every)
 
 
 def main(dry_run=False):
@@ -84,7 +91,7 @@ def main(dry_run=False):
         try:
             ia.upload(item_id, files=paths, metadata=metadata(r), checksum=True, retries=5, retries_sleep=60)
             if not verified(ia, item_id, r["files"]):
-                raise RuntimeError("files on archive.org don't match the local checksums yet")
+                raise RuntimeError("files on archive.org still don't match the local checksums after 3 h")
         except Exception as e:
             failed.append(f"{item_id}: {e}")
             continue
