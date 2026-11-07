@@ -24,6 +24,7 @@ import argparse
 import collections
 import csv
 import datetime as dt
+import email.utils
 import gzip
 import hashlib
 import io
@@ -75,10 +76,35 @@ def connect(data):
 # ---------------------------------------------------------------- census
 
 def download(url, path, opener=urllib.request.urlopen):
+    """Download the bulk file; remember the date LC published it (Last-Modified) in <path>.date."""
     req = urllib.request.Request(url, headers={"User-Agent": UA})
     with opener(req, timeout=600) as r, open(path + ".part", "wb") as fh:
+        stamp = r.headers.get("Last-Modified")
         while chunk := r.read(1 << 20):
             fh.write(chunk)
+    os.replace(path + ".part", path)
+    when = email.utils.parsedate_to_datetime(stamp).date() if stamp else dt.date.today()
+    with open(path + ".date", "w", encoding="utf-8") as fh:
+        fh.write(when.isoformat())
+
+
+def record_history(data, list_date, headings, todo_count):
+    """One line per LC bulk list in data/history.csv: list date, headings, net change since the
+    previous list, and how many headings were new or changed. The download page's counter
+    averages these, so it gets more accurate every week."""
+    path = os.path.join(data, "history.csv")
+    rows = []
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as fh:
+            rows = list(csv.reader(fh))[1:]
+    if any(r[0] == list_date for r in rows):
+        return
+    net = str(headings - int(rows[-1][1])) if rows else ""
+    rows.append([list_date, str(headings), net, str(todo_count)])
+    with open(path + ".part", "w", encoding="utf-8", newline="") as fh:
+        w = csv.writer(fh, lineterminator="\n")
+        w.writerow(["list_date", "headings", "net_change", "new_or_changed"])
+        w.writerows(rows)
     os.replace(path + ".part", path)
 
 
@@ -108,6 +134,9 @@ def census(c, data, fetch_dump=download):
     c.execute("DELETE FROM census")
     c.executemany("INSERT OR REPLACE INTO census VALUES(?,?)", rows)
     c.execute("COMMIT")
+    if os.path.exists(path + ".date"):
+        with open(path + ".date", encoding="utf-8") as fh:
+            record_history(data, fh.read().strip(), len(rows), len(todo(c)))
     return len(rows)
 
 

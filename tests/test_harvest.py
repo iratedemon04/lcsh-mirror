@@ -94,6 +94,22 @@ class CensusTests(Base):
         self.assertNotIn("sh85000001", changed)
         self.assertEqual(len(changed), 1003)
 
+    def test_history_records_each_lc_list_once(self):
+        stamp = os.path.join(self.data, "subjects.madsrdf.jsonld.gz.date")
+        with open(stamp, "w") as fh:
+            fh.write("2026-10-14")
+        self.dump(1000)
+        self.fetch()
+        self.dump(1000)                                    # same list again: no new line
+        with open(stamp, "w") as fh:
+            fh.write("2026-11-04")
+        self.dump(1010, dates={"sh85148273": "2026-10-20T00:00:00"})
+        with open(os.path.join(self.data, "history.csv"), encoding="utf-8") as fh:
+            rows = list(csv.reader(fh))
+        self.assertEqual(rows[0], ["list_date", "headings", "net_change", "new_or_changed"])
+        self.assertEqual(rows[1:], [["2026-10-14", "1003", "", "1003"],
+                                    ["2026-11-04", "1013", "10", "11"]])
+
     def test_refuses_a_suspiciously_small_bulk_file(self):
         with self.assertRaises(harvest.Stop):
             self.dump(0)

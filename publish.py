@@ -11,6 +11,8 @@ scripts and links, and keeps the last KEEP releases. Uploading mirrors the folde
 with rsync; pages, feed and JSON go last, so nothing ever lists a file that isn't
 there yet.
 """
+import csv
+import datetime as dt
 import glob
 import gzip
 import hashlib
@@ -105,7 +107,7 @@ SITE = "https://bibliotecaalonsocossio.com"
 URL = "/lcshmirror/lcsh/"
 LABEL = ["MARC 21", "MARCXML", "CSV"]
 WORD = {"en": "records", "es": "registros"}
-POINTERS = ["current.en.html", "current.es.html", "previous.en.html", "previous.es.html",
+POINTERS = ["current.en.html", "current.es.html", "previous.en.html", "previous.es.html", "stats.en.html", "stats.es.html",
             "index.html", "README.txt", "releases.atom", "releases.json", "latest.json", "SHA256SUMS"]
 
 
@@ -127,9 +129,43 @@ def write(path, text):
         fh.write(text)
 
 
+STATS = {
+    "en": dict(headings="Headings", growth="Growth", changed="New or changed", span="Measured",
+               days="days", per="per day", upd=("update", "updates"), sofar="so far",
+               first="Averages start with the next weekly update."),
+    "es": dict(headings="Encabezamientos", growth="Crecimiento", changed="Nuevos o modificados", span="Medido",
+               days="días", per="por día", upd=("actualización", "actualizaciones"), sofar="hasta ahora",
+               first="Los promedios empiezan con la próxima actualización semanal."),
+}
+
+
+def stats(lang, count, history):
+    """The counter: our own measurements between LC's weekly bulk lists, averaged over all of them."""
+    s = STATS[lang]
+    out = f'<table class="stats">\n<tr><td>{s["headings"]}</td><td><b>{count:,}</b></td></tr>\n'
+    if len(history) < 2:
+        return out + f'</table>\n<p class="small">{s["first"]}</p>\n'
+    first, last = history[0], history[-1]
+    days = max(1, (dt.date.fromisoformat(last[0]) - dt.date.fromisoformat(first[0])).days)
+    net = sum(int(r[2]) for r in history[1:])
+    changed = sum(int(r[3]) for r in history[1:])
+    n = len(history) - 1
+    return out + (
+        f'<tr><td>{s["growth"]}</td><td>{net:+,} / {days} {s["days"]} &asymp; {net / days:+.1f} {s["per"]}</td></tr>\n'
+        f'<tr><td>{s["changed"]}</td><td>{changed:,} / {days} {s["days"]} &asymp; {changed / days:.1f} {s["per"]}</td></tr>\n'
+        f'<tr><td>{s["span"]}</td><td>{first[0]} &ndash; {last[0]} ({n} {s["upd"][n != 1]} {s["sofar"]})</td></tr>\n'
+        "</table>\n")
+
+
 def render(out, releases):
     cur, prev = releases[0], releases[1:]
+    hist_path = os.path.join(os.path.dirname(os.path.dirname(out)), "history.csv")
+    history = []
+    if os.path.exists(hist_path):
+        with open(hist_path, encoding="utf-8") as fh:
+            history = list(csv.reader(fh))[1:]
     for lang in ("en", "es"):
+        write(os.path.join(out, f"stats.{lang}.html"), stats(lang, cur["count"], history))
         n = f'{cur["count"]:,} {WORD[lang]}'
         write(os.path.join(out, f"current.{lang}.html"),
               f'<p>{iso(cur["date"])}, {n}.</p>\n<table class="files">\n{rows(cur)}</table>\n'
@@ -168,7 +204,7 @@ def render(out, releases):
           f"  <author><name>Alonso Cossío Vázquez</name></author>\n{entries}</feed>\n")
 
     # "Index of" listing, like a classic server directory listing
-    names = sorted(f for f in os.listdir(out) if not f.startswith(("current.", "previous.", "index.")))
+    names = sorted(f for f in os.listdir(out) if not f.startswith(("current.", "previous.", "stats.", "index.")))
     width = max(len(f) for f in names) + 2
     listing = "".join(
         f'<a href="{f}">{f}</a>{" " * (width - len(f))}'

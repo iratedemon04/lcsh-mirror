@@ -63,6 +63,17 @@ class PublishTests(unittest.TestCase):
             self.assertIn(f'href="{f}"', listing)
         self.assertNotIn("current.en.html", listing)
 
+    def test_counter_averages_our_own_measurements(self):
+        self.assertIn("468,352", publish.stats("en", 468352, [["2026-10-14", "468211", "", "468211"]]))
+        self.assertIn("next weekly update", publish.stats("en", 468352, [["2026-10-14", "468211", "", "468211"]]))
+        h = [["2026-10-14", "468211", "", "468211"], ["2026-11-04", "468360", "149", "206"],
+             ["2026-11-11", "468400", "40", "70"]]
+        en = publish.stats("en", 468400, h)
+        self.assertIn("+189 / 28 days &asymp; +6.8 per day", en)
+        self.assertIn("276 / 28 days &asymp; 9.9 per day", en)
+        self.assertIn("2026-10-14 &ndash; 2026-11-11 (2 updates so far)", en)
+        self.assertIn("2 actualizaciones hasta ahora", publish.stats("es", 468400, h))
+
     def test_keeps_only_the_newest_releases(self):
         dates = ["20261003", "20261010", "20261017", "20261024", "20261031"]
         for d in dates:
