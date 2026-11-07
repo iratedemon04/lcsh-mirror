@@ -130,31 +130,23 @@ def write(path, text):
 
 
 STATS = {
-    "en": dict(headings="Headings", growth="Growth", changed="New or changed", span="Measured",
-               days="days", per="per day", upd=("update", "updates"), sofar="so far",
-               first="Averages start with the next weekly update."),
-    "es": dict(headings="Encabezamientos", growth="Crecimiento", changed="Nuevos o modificados", span="Medido",
-               days="días", per="por día", upd=("actualización", "actualizaciones"), sofar="hasta ahora",
-               first="Los promedios empiezan con la próxima actualización semanal."),
+    "en": "{count} headings. Since {since}: {net} net ({netd}/day), {changed} new or changed ({chd}/day).",
+    "es": "{count} encabezamientos. Desde {since}: {net} netos ({netd}/día), {changed} nuevos o modificados ({chd}/día).",
+    "en0": "{count} headings.",
+    "es0": "{count} encabezamientos.",
 }
 
 
 def stats(lang, count, history):
-    """The counter: our own measurements between LC's weekly bulk lists, averaged over all of them."""
-    s = STATS[lang]
-    out = f'<table class="stats">\n<tr><td>{s["headings"]}</td><td><b>{count:,}</b></td></tr>\n'
+    """One line: the count, plus averages between LC's weekly lists (our own measurements)."""
     if len(history) < 2:
-        return out + f'</table>\n<p class="small">{s["first"]}</p>\n'
+        return "<p>" + STATS[lang + "0"].format(count=f"{count:,}") + "</p>\n"
     first, last = history[0], history[-1]
     days = max(1, (dt.date.fromisoformat(last[0]) - dt.date.fromisoformat(first[0])).days)
     net = sum(int(r[2]) for r in history[1:])
     changed = sum(int(r[3]) for r in history[1:])
-    n = len(history) - 1
-    return out + (
-        f'<tr><td>{s["growth"]}</td><td>{net:+,} / {days} {s["days"]} &asymp; {net / days:+.1f} {s["per"]}</td></tr>\n'
-        f'<tr><td>{s["changed"]}</td><td>{changed:,} / {days} {s["days"]} &asymp; {changed / days:.1f} {s["per"]}</td></tr>\n'
-        f'<tr><td>{s["span"]}</td><td>{first[0]} &ndash; {last[0]} ({n} {s["upd"][n != 1]} {s["sofar"]})</td></tr>\n'
-        "</table>\n")
+    return "<p>" + STATS[lang].format(count=f"{count:,}", since=first[0], net=f"{net:+,}", netd=f"{net / days:.1f}",
+                                      changed=f"{changed:,}", chd=f"{changed / days:.1f}") + "</p>\n"
 
 
 def render(out, releases):
