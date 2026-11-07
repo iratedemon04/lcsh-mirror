@@ -7,7 +7,7 @@ Prepare a release for download and, optionally, upload it.
 
 Staging gzips the newest release in data/release/, writes latest.json and the
 static HTML pieces of the download page, keeps fixed-name lcsh-latest.* copies for
-scripts and links, and keeps the last KEEP releases. Uploading mirrors the folder
+scripts and links, and keeps the last KEEP_PUBLISHED releases (KEEP locally). Uploading mirrors the folder
 with rsync; pages, feed and JSON go last, so nothing ever lists a file that isn't
 there yet.
 """
@@ -24,7 +24,10 @@ import subprocess
 import sys
 import time
 
-KEEP = 4
+KEEP = 4              # uncompressed releases kept locally (the previous one is needed for change files)
+KEEP_PUBLISHED = 50   # releases kept on the download server
+SHOW_PREVIOUS = 3     # previous releases listed on the page (all of them are in the file listing)
+FEED = 20             # releases in the Atom feed
 # (source in data/release, fixed-name alias, label en, label es). The last four only exist
 # when there was an earlier release to compare with.
 FILES = [("lcsh-{d}.mrc", "lcsh-latest.mrc.gz", "MARC 21", "MARC 21"),
@@ -87,10 +90,10 @@ def stage(release, out):
         for f in files:
             fh.write(f"{f['sha256']}  {f['name']}\n")
 
-    # keep the newest KEEP releases, here and in the uncompressed release folder
-    for folder in (out, release):
+    # keep the newest KEEP_PUBLISHED releases online and KEEP uncompressed ones locally
+    for folder, keep in ((out, KEEP_PUBLISHED), (release, KEEP)):
         old = sorted({m.group(1) for f in os.listdir(folder)
-                      if (m := re.match(r"(?:lcsh|manifest|changes|deleted|SHA256SUMS)-(\d{8})", f))})[:-KEEP]
+                      if (m := re.match(r"(?:lcsh|manifest|changes|deleted|SHA256SUMS)-(\d{8})", f))})[:-keep]
         for o in old:
             for f in glob.glob(os.path.join(folder, f"*-{o}*")):
                 os.remove(f)
@@ -198,7 +201,9 @@ def render(out, releases):
               "".join(f'<h3>{iso(r["date"])}, {r["count"]:,} {WORD[lang]}</h3>\n'
                       + (f'<p class="small">{delta(r, prev[i + 1], lang)}</p>\n' if i + 1 < len(prev) and "new" in r else "")
                       + f'<table class="files">\n{rows(r, lang)}</table>\n'
-                      for i, r in enumerate(prev)) or "<p>&ndash;</p>\n")
+                      for i, r in enumerate(prev[:SHOW_PREVIOUS]))
+              + (f'<p class="small"><a href="{URL}">{"Older releases" if lang == "en" else "Versiones más antiguas"}</a></p>\n'
+                 if len(prev) > SHOW_PREVIOUS else "") or "<p>&ndash;</p>\n")
 
     # README.txt
     lines = [f"LCSH mirror: {SITE}/lcshmirror/", "",
@@ -224,7 +229,7 @@ def render(out, releases):
         f"    <updated>{iso(r['date'])}T00:00:00Z</updated>\n"
         f'    <link href="{SITE}/lcshmirror/"/>\n'
         f"    <content type=\"text\">{' '.join(SITE + URL + f['name'] for f in r['files'])}</content>\n  </entry>\n"
-        for r in releases)
+        for r in releases[:FEED])
     write(os.path.join(out, "releases.atom"),
           '<?xml version="1.0" encoding="utf-8"?>\n<feed xmlns="http://www.w3.org/2005/Atom">\n'
           f"  <title>LCSH mirror releases</title>\n  <id>{SITE}/lcshmirror/</id>\n  <updated>{now}</updated>\n"

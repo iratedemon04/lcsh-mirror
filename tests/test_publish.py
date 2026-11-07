@@ -81,15 +81,30 @@ class PublishTests(unittest.TestCase):
             self.make_release(d)
             publish.stage(self.release, self.out)
         staged = {f.split("-")[1][:8] for f in os.listdir(self.out) if f.startswith("lcsh-2")}
-        self.assertEqual(staged, set(dates[-publish.KEEP:]))
+        self.assertEqual(staged, set(dates))                           # server keeps up to KEEP_PUBLISHED
         kept = {f.split("-")[1][:8] for f in os.listdir(self.release) if f.startswith("lcsh-")}
-        self.assertEqual(kept, set(dates[-publish.KEEP:]))
+        self.assertEqual(kept, set(dates[-publish.KEEP:]))             # local uncompressed: only KEEP
         with open(os.path.join(self.out, "latest.json"), encoding="utf-8") as fh:
             self.assertEqual(json.load(fh)["date"], "20261031")
         with open(os.path.join(self.out, "releases.json"), encoding="utf-8") as fh:
             rel = json.load(fh)
-        self.assertEqual([r["date"] for r in rel], sorted(dates[-publish.KEEP:], reverse=True))
+        self.assertEqual([r["date"] for r in rel], sorted(dates, reverse=True))
         self.assertTrue(all(r["count"] == 3 and len(r["files"]) in (3, 7) for r in rel))
+        with open(os.path.join(self.out, "previous.en.html"), encoding="utf-8") as fh:
+            page = fh.read()
+        self.assertEqual(page.count("<h3>"), publish.SHOW_PREVIOUS)   # 4 previous, 3 shown
+        self.assertIn("Older releases", page)
+
+    def test_server_retention_limit(self):
+        old, publish.KEEP_PUBLISHED = publish.KEEP_PUBLISHED, 2
+        try:
+            for d in ("20261017", "20261024", "20261031"):
+                self.make_release(d)
+                publish.stage(self.release, self.out)
+        finally:
+            publish.KEEP_PUBLISHED = old
+        staged = {f.split("-")[1][:8] for f in os.listdir(self.out) if f.startswith("lcsh-2")}
+        self.assertEqual(staged, {"20261024", "20261031"})
 
 
 if __name__ == "__main__":
