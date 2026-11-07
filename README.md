@@ -28,6 +28,12 @@ Genre/Form Terms and children's headings are separate vocabularies and not inclu
 
 ## Build it yourself
 
+Anyone can run exactly the same process that builds this mirror; that's the point
+of it being open. If you just need the data, though, downloading a release from the
+mirror or the [Internet Archive](https://archive.org/search?query=identifier%3Alcsh-mirror-*)
+is quicker for you and kinder to id.loc.gov: the 16-day harvest is already done, and
+each download saves LC's service about 470,000 requests.
+
 ```
 pip install -r requirements.txt
 python harvest.py               # first run ~16 days, later runs minutes; resumable
