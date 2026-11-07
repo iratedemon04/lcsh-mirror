@@ -1,1 +1,2 @@
 pymarc>=5.2
+internetarchive>=5.0   # only for archive.py (optional)
