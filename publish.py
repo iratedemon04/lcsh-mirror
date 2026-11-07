@@ -71,7 +71,9 @@ def stage(release, out):
                 os.remove(os.path.join(out, latest))
             continue
         if not os.path.exists(gz):
-            with open(src, "rb") as fi, gzip.open(gz + ".part", "wb", compresslevel=9) as fo:
+            # name the gzip header after the real file, not the .part temp (unzip tools use it)
+            with open(src, "rb") as fi, open(gz + ".part", "wb") as raw, \
+                    gzip.GzipFile(os.path.basename(src), "wb", 9, raw) as fo:
                 shutil.copyfileobj(fi, fo, 1 << 20)
             os.replace(gz + ".part", gz)
         link = os.path.join(out, latest)

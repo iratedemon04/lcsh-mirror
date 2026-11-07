@@ -42,6 +42,11 @@ class PublishTests(unittest.TestCase):
         with gzip.open(os.path.join(self.out, "lcsh-latest.mrc.gz"), "rb") as fh, \
                 open(os.path.join(self.release, "lcsh-20261024.mrc"), "rb") as orig:
             self.assertEqual(fh.read(), orig.read())
+        # the name stored in the gzip header is what 7-Zip/Windows extract to
+        with open(os.path.join(self.out, "lcsh-20261024.mrc.gz"), "rb") as fh:
+            head = fh.read(64)
+        self.assertTrue(head[3] & 8)
+        self.assertEqual(head[10:head.index(b"\0", 10)], b"lcsh-20261024.mrc")
 
     def test_static_pages_feed_and_listing(self):
         import xml.etree.ElementTree as ET
