@@ -54,6 +54,10 @@ class PublishTests(unittest.TestCase):
         self.assertEqual(kept, set(dates[-publish.KEEP:]))
         with open(os.path.join(self.out, "latest.json"), encoding="utf-8") as fh:
             self.assertEqual(json.load(fh)["date"], "20261031")
+        with open(os.path.join(self.out, "releases.json"), encoding="utf-8") as fh:
+            rel = json.load(fh)
+        self.assertEqual([r["date"] for r in rel], sorted(dates[-publish.KEEP:], reverse=True))
+        self.assertTrue(all(r["count"] == 3 and len(r["files"]) == 3 for r in rel))
 
 
 if __name__ == "__main__":

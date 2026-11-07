@@ -77,6 +77,20 @@ def stage(release, out):
         for o in old:
             for f in glob.glob(os.path.join(folder, f"*-{o}*")):
                 os.remove(f)
+
+    # every release still staged, newest first: the page lists the older ones
+    releases = []
+    for rd in sorted({m.group(1) for f in os.listdir(out)
+                      if (m := re.fullmatch(r"lcsh-(\d{8})\.mrc\.gz", f))}, reverse=True):
+        paths = [os.path.join(out, src.format(d=rd) + ".gz") for src, _ in FILES]
+        if not all(os.path.exists(p) for p in paths):
+            continue
+        with gzip.open(paths[2], "rt", encoding="utf-8") as fh:
+            rcount = sum(1 for _ in fh) - 1
+        releases.append({"date": rd, "count": rcount, "files": [
+            {"name": os.path.basename(p), "size": os.path.getsize(p), "sha256": sha256(p)} for p in paths]})
+    with open(os.path.join(out, "releases.json"), "w", encoding="utf-8", newline="\n") as fh:
+        json.dump(releases, fh, indent=1)
     print(f"staged {d}: {count} records in {out}")
     return d
 
