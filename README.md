@@ -4,6 +4,8 @@ A full, current copy of **Library of Congress Subject Headings** as MARC authori
 records, rebuilt weekly from LC's own id.loc.gov service, plus the small script that
 builds it so anyone can make their own.
 
+**Download the latest release:** https://bibliotecaalonsocossio.com/lcshmirror/
+
 **Unofficial.** Not affiliated with or endorsed by the Library of Congress or the US Government.
 
 ## What you get
