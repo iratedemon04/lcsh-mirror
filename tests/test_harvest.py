@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -202,6 +203,29 @@ class BuildTests(Base):
                 digest, name = line.split("  ")
                 with open(os.path.join(out, name), "rb") as f:
                     self.assertEqual(hashlib.sha256(f.read()).hexdigest(), digest)
+
+    def test_second_release_lists_new_changed_and_deleted(self):
+        self.fetch()
+        out = os.path.join(self.data, "release")
+        kept = self.c.execute("SELECT changed FROM census WHERE id='sh2007005138'").fetchone()[0]
+        self.c.execute("DELETE FROM census WHERE id='sh2007005138'")       # not in the first release
+        harvest.build(self.c, out, date="20261101")
+        self.assertFalse(os.path.exists(os.path.join(out, "changes-20261101.csv")))   # nothing to compare yet
+        self.c.execute("INSERT INTO census VALUES('sh2007005138', ?)", (kept,))        # -> new
+        self.c.execute("DELETE FROM census WHERE id='sh85076432'")                     # -> deleted
+        body = self.c.execute("SELECT xml FROM records WHERE id='sh85148273'").fetchone()[0]
+        body = re.sub(rb'(tag="005">)[^<]*', rb"\g<1>20261105000000.0", body)
+        self.c.execute("UPDATE records SET xml=? WHERE id='sh85148273'", (body,))      # -> changed
+        harvest.build(self.c, out, date="20261108")
+        with open(os.path.join(out, "changes-20261108.csv"), encoding="utf-8") as fh:
+            changes = [(r[0], r[1]) for r in list(csv.reader(fh))[1:]]
+        self.assertEqual(changes, [("sh 85148273", "changed"), ("sh2007005138", "new")])
+        with open(os.path.join(out, "deleted-20261108.csv"), encoding="utf-8") as fh:
+            self.assertEqual(list(csv.reader(fh))[1:], [["sh 85076432", "Libel and slander"]])
+        with open(os.path.join(out, "changes-20261108.mrc"), "rb") as fh:
+            self.assertEqual(len(list(pymarc.MARCReader(fh, to_unicode=True, force_utf8=True))), 2)
+        with open(os.path.join(out, "SHA256SUMS-20261108"), encoding="utf-8") as fh:
+            self.assertEqual(len(fh.read().split("\n")[:-1]), 7)
 
     def test_round_trip_is_faithful(self):
         """The .mrc holds exactly what LC sent: same fields, order, values. Only the

@@ -53,7 +53,10 @@ class PublishTests(unittest.TestCase):
         self.assertIn("3 registros", read("current.es.html"))
         self.assertIn("/lcshmirror/lcsh/lcsh-20261031.mrc.gz", read("current.en.html"))
         self.assertIn("2026-10-24", read("previous.en.html"))
-        self.assertNotIn("2026-10-24", read("current.en.html"))
+        self.assertNotIn("lcsh-20261024", read("current.en.html"))
+        self.assertIn("Since 2026-10-24: 0 new, 0 changed, 0 deleted.", read("current.en.html"))
+        self.assertIn("changes-20261031.mrc.gz", read("current.en.html"))
+        self.assertIn("eliminados, CSV", read("current.es.html"))
         self.assertIn("Current release: 2026-10-31, 3 records", read("README.txt"))
         feed = ET.fromstring(read("releases.atom"))
         self.assertEqual(len(feed.findall("{http://www.w3.org/2005/Atom}entry")), 2)
@@ -86,7 +89,7 @@ class PublishTests(unittest.TestCase):
         with open(os.path.join(self.out, "releases.json"), encoding="utf-8") as fh:
             rel = json.load(fh)
         self.assertEqual([r["date"] for r in rel], sorted(dates[-publish.KEEP:], reverse=True))
-        self.assertTrue(all(r["count"] == 3 and len(r["files"]) == 3 for r in rel))
+        self.assertTrue(all(r["count"] == 3 and len(r["files"]) in (3, 7) for r in rel))
 
 
 if __name__ == "__main__":

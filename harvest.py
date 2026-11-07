@@ -269,30 +269,74 @@ def heading(rec):
     return "--".join(sf.value.strip() for sf in f.subfields if sf.code in "avxyz") if f else ""
 
 
+def previous_release(out, date):
+    """lccn -> (sha1 of the MARC record, heading) for the newest release before `date`, or None."""
+    older = sorted(f for f in os.listdir(out) if (m := re.fullmatch(r"lcsh-(\d{8})\.mrc", f)) and m.group(1) < date)
+    if not older:
+        return None, None
+    prev = {}
+    with open(os.path.join(out, older[-1]), "rb") as fh:
+        for rec in pymarc.MARCReader(fh, to_unicode=True, force_utf8=True):
+            prev[lccn(rec)] = (hashlib.sha1(rec.as_marc()).hexdigest(), heading(rec))
+    return older[-1][5:13], prev
+
+
+def write_csv(path, header, rows):
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        w = csv.writer(fh)
+        w.writerow(header)
+        w.writerows(rows)
+
+
 def build(c, out, date=None):
     """Write a release from every stored heading in the current census.
-    Complete when every heading in the census is either stored and up to date, or gone."""
+    Complete when every heading in the census is either stored and up to date, or gone.
+    When an older release exists, also write what changed since it: changes-DATE.mrc/.mrcxml/.csv
+    (new or changed records; changed = different MARC content) and deleted-DATE.csv."""
     if todo(c):
         print(f"INCOMPLETE: {len(todo(c))} headings not fetched yet")
         return False
     date = date or dt.date.today().strftime("%Y%m%d")
     os.makedirs(out, exist_ok=True)
     base = os.path.join(out, f"lcsh-{date}")
-    rows = []
+    prev_date, prev = previous_release(out, date)
+    rows, changes, seen = [], [], set()
+    cmrc = cxml = cxw = None
+    if prev is not None:
+        cmrc = open(os.path.join(out, f"changes-{date}.mrc"), "wb")
+        cxml = open(os.path.join(out, f"changes-{date}.mrcxml"), "wb")
+        cxw = pymarc.XMLWriter(cxml)
     with open(base + ".mrc", "wb") as mrc, open(base + ".mrcxml", "wb") as xml:
         xw = pymarc.XMLWriter(xml)
         for (body,) in c.execute("SELECT xml FROM records JOIN census USING(id) ORDER BY id"):
             rec = pymarc.parse_xml_to_array(io.BytesIO(body))[0]
-            mrc.write(rec.as_marc())
+            raw = rec.as_marc()
+            mrc.write(raw)
             xw.write(rec)
-            rows.append((lccn(rec), rec["005"].data if rec["005"] else "", heading(rec)))
+            row = (lccn(rec), rec["005"].data if rec["005"] else "", heading(rec))
+            rows.append(row)
+            if prev is not None:
+                seen.add(row[0])
+                old = prev.get(row[0])
+                if old is None or old[0] != hashlib.sha1(raw).hexdigest():
+                    cmrc.write(raw)
+                    cxw.write(rec)
+                    changes.append((row[0], "new" if old is None else "changed", row[1], row[2]))
         xw.close(close_fh=False)
     rows.sort()
-    with open(os.path.join(out, f"manifest-{date}.csv"), "w", newline="", encoding="utf-8") as fh:
-        w = csv.writer(fh)
-        w.writerow(["lccn", "005", "heading"])
-        w.writerows(rows)
+    write_csv(os.path.join(out, f"manifest-{date}.csv"), ["lccn", "005", "heading"], rows)
     names = [f"lcsh-{date}.mrc", f"lcsh-{date}.mrcxml", f"manifest-{date}.csv"]
+    if prev is not None:
+        cxw.close(close_fh=False)
+        cmrc.close()
+        cxml.close()
+        changes.sort()
+        deleted = sorted((k, v[1]) for k, v in prev.items() if k not in seen)
+        write_csv(os.path.join(out, f"changes-{date}.csv"), ["lccn", "status", "005", "heading"], changes)
+        write_csv(os.path.join(out, f"deleted-{date}.csv"), ["lccn", "heading"], deleted)
+        names += [f"changes-{date}.mrc", f"changes-{date}.mrcxml", f"changes-{date}.csv", f"deleted-{date}.csv"]
+        new = sum(1 for x in changes if x[1] == "new")
+        print(f"since {prev_date}: {new} new, {len(changes) - new} changed, {len(deleted)} deleted")
     with open(os.path.join(out, f"SHA256SUMS-{date}"), "w", encoding="utf-8") as fh:
         for n in names:
             h = hashlib.sha256()
