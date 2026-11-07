@@ -43,6 +43,26 @@ class PublishTests(unittest.TestCase):
                 open(os.path.join(self.release, "lcsh-20261024.mrc"), "rb") as orig:
             self.assertEqual(fh.read(), orig.read())
 
+    def test_static_pages_feed_and_listing(self):
+        import xml.etree.ElementTree as ET
+        for d in ("20261024", "20261031"):
+            self.make_release(d)
+            publish.stage(self.release, self.out)
+        read = lambda n: open(os.path.join(self.out, n), encoding="utf-8").read()
+        self.assertIn("2026-10-31, 3 records.", read("current.en.html"))
+        self.assertIn("3 registros", read("current.es.html"))
+        self.assertIn("/lcshmirror/lcsh/lcsh-20261031.mrc.gz", read("current.en.html"))
+        self.assertIn("2026-10-24", read("previous.en.html"))
+        self.assertNotIn("2026-10-24", read("current.en.html"))
+        self.assertIn("Current release: 2026-10-31, 3 records", read("README.txt"))
+        feed = ET.fromstring(read("releases.atom"))
+        self.assertEqual(len(feed.findall("{http://www.w3.org/2005/Atom}entry")), 2)
+        listing = read("index.html")
+        self.assertIn("Index of /lcshmirror/lcsh/", listing)
+        for f in ("lcsh-20261031.mrc.gz", "README.txt", "releases.atom", "SHA256SUMS"):
+            self.assertIn(f'href="{f}"', listing)
+        self.assertNotIn("current.en.html", listing)
+
     def test_keeps_only_the_newest_releases(self):
         dates = ["20261003", "20261010", "20261017", "20261024", "20261031"]
         for d in dates:

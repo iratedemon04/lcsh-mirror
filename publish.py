@@ -5,10 +5,10 @@ Prepare a release for download and, optionally, upload it.
     python publish.py                        # stage only, into data/publish/lcsh/
     python publish.py user@host:/path/lcsh/  # stage, then rsync there
 
-Staging gzips the newest release in data/release/, writes latest.json (what the
-download page reads), keeps fixed-name lcsh-latest.* copies for scripts and
-links, and keeps the last KEEP releases. Uploading mirrors the staging folder
-with rsync; latest.json goes last, so the page never lists a file that isn't
+Staging gzips the newest release in data/release/, writes latest.json and the
+static HTML pieces of the download page, keeps fixed-name lcsh-latest.* copies for
+scripts and links, and keeps the last KEEP releases. Uploading mirrors the folder
+with rsync; pages, feed and JSON go last, so nothing ever lists a file that isn't
 there yet.
 """
 import glob
@@ -20,6 +20,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 
 KEEP = 4
 FILES = [("lcsh-{d}.mrc", "lcsh-latest.mrc.gz"),
@@ -91,14 +92,101 @@ def stage(release, out):
             {"name": os.path.basename(p), "size": os.path.getsize(p), "sha256": sha256(p)} for p in paths]})
     with open(os.path.join(out, "releases.json"), "w", encoding="utf-8", newline="\n") as fh:
         json.dump(releases, fh, indent=1)
+    render(out, releases)
     print(f"staged {d}: {count} records in {out}")
     return d
 
 
+# ---------------------------------------------------------------- static pages
+# Plain HTML, no scripts: the download page pulls the snippets in with Server Side
+# Includes, and lcsh/ gets an "Index of" listing, a README.txt and an Atom feed.
+
+SITE = "https://bibliotecaalonsocossio.com"
+URL = "/lcshmirror/lcsh/"
+LABEL = ["MARC 21", "MARCXML", "CSV"]
+WORD = {"en": "records", "es": "registros"}
+POINTERS = ["current.en.html", "current.es.html", "previous.en.html", "previous.es.html",
+            "index.html", "README.txt", "releases.atom", "releases.json", "latest.json", "SHA256SUMS"]
+
+
+def iso(d):
+    return f"{d[:4]}-{d[4:6]}-{d[6:]}"
+
+
+def human(n):
+    return f"{n / 1e9:.1f} GB" if n >= 1e9 else f"{n / 1e6:.0f} MB" if n >= 1e6 else f"{n / 1e3:.0f} KB"
+
+
+def rows(r):
+    return "".join(f'<tr><td><a href="{URL}{f["name"]}">{f["name"]}</a></td><td class="sz">{human(f["size"])}</td>'
+                   f'<td>{LABEL[i]}</td></tr>\n' for i, f in enumerate(r["files"]))
+
+
+def write(path, text):
+    with open(path, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(text)
+
+
+def render(out, releases):
+    cur, prev = releases[0], releases[1:]
+    for lang in ("en", "es"):
+        n = f'{cur["count"]:,} {WORD[lang]}'
+        write(os.path.join(out, f"current.{lang}.html"),
+              f'<p>{iso(cur["date"])}, {n}.</p>\n<table class="files">\n{rows(cur)}</table>\n'
+              f'<p class="small"><a href="{URL}SHA256SUMS">SHA256SUMS</a> &middot; '
+              f'<a href="{URL}">{"all files" if lang == "en" else "todos los archivos"}</a> &middot; '
+              f'<a href="{URL}releases.atom">Atom</a></p>\n')
+        write(os.path.join(out, f"previous.{lang}.html"),
+              "".join(f'<h3>{iso(r["date"])}, {r["count"]:,} {WORD[lang]}</h3>\n<table class="files">\n{rows(r)}</table>\n'
+                      for r in prev) or "<p>&ndash;</p>\n")
+
+    # README.txt
+    lines = [f"LCSH mirror: {SITE}/lcshmirror/", "",
+             "Every Library of Congress Subject Heading as a MARC authority record,",
+             "taken from id.loc.gov and rebuilt weekly. Unofficial; not affiliated with",
+             "or endorsed by the Library of Congress. Data: public domain (CC0).", "",
+             f"Current release: {iso(cur['date'])}, {cur['count']:,} records", ""]
+    lines += [f"  {f['name']:<28} {human(f['size']):>7}  {LABEL[i]}" for i, f in enumerate(cur["files"])]
+    lines += ["", "lcsh-latest.* and manifest-latest.* always point to the current release.", "",
+              "Verify:   sha256sum -c SHA256SUMS", "Read:     MarcEdit > MarcBreaker (.mrc -> .mrk)",
+              "Feed:     releases.atom", "Code:     https://github.com/iratedemon04/lcsh-mirror", ""]
+    write(os.path.join(out, "README.txt"), "\n".join(lines))
+
+    # Atom feed, one entry per release still on the server
+    now = f"{iso(cur['date'])}T00:00:00Z"
+    entries = "".join(
+        f"  <entry>\n    <title>LCSH release {iso(r['date'])}: {r['count']:,} records</title>\n"
+        f"    <id>tag:bibliotecaalonsocossio.com,2026:lcsh-{r['date']}</id>\n"
+        f"    <updated>{iso(r['date'])}T00:00:00Z</updated>\n"
+        f'    <link href="{SITE}/lcshmirror/"/>\n'
+        f"    <content type=\"text\">{' '.join(SITE + URL + f['name'] for f in r['files'])}</content>\n  </entry>\n"
+        for r in releases)
+    write(os.path.join(out, "releases.atom"),
+          '<?xml version="1.0" encoding="utf-8"?>\n<feed xmlns="http://www.w3.org/2005/Atom">\n'
+          f"  <title>LCSH mirror releases</title>\n  <id>{SITE}/lcshmirror/</id>\n  <updated>{now}</updated>\n"
+          f'  <link href="{SITE}/lcshmirror/"/>\n  <link rel="self" href="{SITE}{URL}releases.atom"/>\n'
+          f"  <author><name>Alonso Cossío Vázquez</name></author>\n{entries}</feed>\n")
+
+    # "Index of" listing, like a classic server directory listing
+    names = sorted(f for f in os.listdir(out) if not f.startswith(("current.", "previous.", "index.")))
+    width = max(len(f) for f in names) + 2
+    listing = "".join(
+        f'<a href="{f}">{f}</a>{" " * (width - len(f))}'
+        f'{time.strftime("%Y-%m-%d %H:%M", time.gmtime(os.path.getmtime(os.path.join(out, f))))}'
+        f'{os.path.getsize(os.path.join(out, f)):>14}\n' for f in names)
+    write(os.path.join(out, "index.html"),
+          f"<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\"><title>Index of {URL}</title></head>\n"
+          f"<body>\n<h1>Index of {URL}</h1><hr><pre><a href=\"../\">../</a>\n{listing}</pre><hr>\n"
+          f'<p>Read <a href="README.txt">README.txt</a> first. '
+          f'<a href="/lcshmirror/">LCSH mirror</a></p>\n</body></html>\n')
+
+
 def upload(out, dest):
-    base = ["rsync", "-rtH", "--chmod=D755,F644", "--delete-after"]
-    subprocess.run(base + ["--exclude", "latest.json", out.rstrip("/") + "/", dest], check=True)
-    subprocess.run(["rsync", "-t", "--chmod=F644", os.path.join(out, "latest.json"), dest], check=True)
+    """Data files first, then everything that points at them, so nothing links a missing file."""
+    base = ["rsync", "-rtH", "--chmod=D755,F644"]
+    skip = [x for p in POINTERS for x in ("--exclude", p)]
+    subprocess.run(base + skip + [out.rstrip("/") + "/", dest], check=True)
+    subprocess.run(base + ["--delete-after", out.rstrip("/") + "/", dest], check=True)
     print(f"uploaded to {dest}")
 
 
