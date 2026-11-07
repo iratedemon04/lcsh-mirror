@@ -131,6 +131,7 @@ def stage(release, out):
 
 SITE = "https://bibliotecaalonsocossio.com"
 URL = "/lcshmirror/lcsh/"
+ARCHIVE = "https://archive.org/search?query=identifier%3Alcsh-mirror-%2A"
 WORD = {"en": "records", "es": "registros"}
 DELTA = {"en": "Since {prev}: {new:,} new, {changed:,} changed, {deleted:,} deleted.",
          "es": "Desde {prev}: {new:,} nuevos, {changed:,} modificados, {deleted:,} eliminados."}
@@ -196,7 +197,8 @@ def render(out, releases):
               f'<p>{iso(cur["date"])}, {n}.{" " + d if d else ""}</p>\n<table class="files">\n{rows(cur, lang)}</table>\n'
               f'<p class="small"><a href="{URL}SHA256SUMS">SHA256SUMS</a> &middot; '
               f'<a href="{URL}">{"all files" if lang == "en" else "todos los archivos"}</a> &middot; '
-              f'<a href="{URL}releases.atom">Atom</a></p>\n')
+              f'<a href="{URL}releases.atom">Atom</a> &middot; '
+              f'<a href="{ARCHIVE}">{"all releases on the Internet Archive" if lang == "en" else "todas las versiones en el Internet Archive"}</a></p>\n')
         write(os.path.join(out, f"previous.{lang}.html"),
               "".join(f'<h3>{iso(r["date"])}, {r["count"]:,} {WORD[lang]}</h3>\n'
                       + (f'<p class="small">{delta(r, prev[i + 1], lang)}</p>\n' if i + 1 < len(prev) and "new" in r else "")
@@ -217,7 +219,7 @@ def render(out, releases):
     lines += ["", "*-latest.* always point to the current release. changes-* hold only the records",
               "new or changed since the previous release; deleted-* lists headings removed since then.", "",
               "Verify:   sha256sum -c SHA256SUMS", "Read:     MarcEdit > MarcBreaker (.mrc -> .mrk)",
-              "Feed:     releases.atom", "Code:     https://github.com/iratedemon04/lcsh-mirror", ""]
+              "Feed:     releases.atom", "Archive:  " + ARCHIVE, "Code:     https://github.com/iratedemon04/lcsh-mirror", ""]
     write(os.path.join(out, "README.txt"), "\n".join(lines))
 
     # Atom feed, one entry per release still on the server
