@@ -1,4 +1,6 @@
+import gzip
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -26,6 +28,15 @@ class LoadTests(unittest.TestCase):
             marc = c.execute("SELECT marc FROM records WHERE lccn='sh 85076432'").fetchone()[0]
             self.assertIn("=150  \\\\$aLibel and slander", load.preview(marc))
             c.close()
+
+    def test_loads_a_downloaded_gz(self):
+        with tempfile.TemporaryDirectory() as d:
+            make_release(d, "20261020")
+            src = os.path.join(d, "release", "lcsh-20261020.mrc")
+            with open(src, "rb") as fi, gzip.open(src + ".gz", "wb") as fo:
+                shutil.copyfileobj(fi, fo)
+            db = os.path.join(d, "new", "lcsh.db")                       # folder made on demand
+            self.assertEqual(load.load(src + ".gz", db), 3)
 
 
 if __name__ == "__main__":

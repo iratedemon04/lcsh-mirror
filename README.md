@@ -37,7 +37,7 @@ each download saves LC's service about 470,000 requests.
 ```
 pip install -r requirements.txt
 python harvest.py               # first run ~16 days, later runs minutes; resumable
-python load.py data/release/lcsh-YYYYMMDD.mrc   # optional: searchable SQLite
+python load.py data/release/lcsh-YYYYMMDD.mrc   # optional: searchable SQLite (a downloaded .mrc.gz works too)
 python tui.py libel             # optional: terminal browser (Linux/macOS)
 python publish.py [user@host:/path/]   # optional: gzip + latest.json, then rsync
 ```

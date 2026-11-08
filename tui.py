@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
-Interactive LCSH browser over the database built by load.py.
+Interactive LCSH browser over the database built by load.py. No harvest needed:
+load a release downloaded from the mirror, then browse it.
 
+    python load.py lcsh-YYYYMMDD.mrc.gz
     python tui.py <words>
 
   up/down j/k   move          enter   send record to the outbox
@@ -21,9 +23,8 @@ import time
 
 import load
 
-DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
-DB = os.environ.get("LCSH_DB", os.path.join(DATA, "lcsh.db"))
-OUTBOX = os.environ.get("LCSH_OUTBOX", os.path.join(DATA, "outbox"))
+DB = load.DB
+OUTBOX = os.environ.get("LCSH_OUTBOX", os.path.join(load.DATA, "outbox"))
 LIMIT = 5000
 
 
