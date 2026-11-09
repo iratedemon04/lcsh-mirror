@@ -53,6 +53,15 @@ the pace: it's a shared public service.
 Progress is written to `data/dash/` (`status.json` + a small `index.html`) for a
 dashboard. The build only runs when every heading is fetched.
 
+## Say hello
+
+If you use this mirror, I'd love to hear from you, even if it's just a line about which
+library you're at or what you're using it for. Questions, bugs, a format you'd like, or a
+record that doesn't import cleanly are all welcome too.
+
+[Open an issue](https://github.com/iratedemon04/lcsh-mirror/issues) or write to me at
+iratedemon04 at gmail dot com. I read everything, and I'm happy to answer in English or Spanish.
+
 ## Licence
 
 Code: MIT (see `LICENSE`). Data: LC authority data is a US Government work, free of
