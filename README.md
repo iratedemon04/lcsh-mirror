@@ -19,11 +19,15 @@ Each release (`lcsh-YYYYMMDD.*`):
 | `manifest-YYYYMMDD.csv` | one row per record: LCCN, 005 (last changed at LC), heading |
 | `SHA256SUMS-YYYYMMDD` | checksums |
 
-Records are exactly as LC serves them, including 005/008/040. Only the MARC
-leader's computed length/base-address positions are recalculated when writing `.mrc`.
+Record content is exactly as LC serves it, including 005/008/040: same fields,
+order and values. The files are written by pymarc, so they are not byte-identical
+to LC's MARCXML: the MARCXML is re-serialized, and the leader's computed
+length/base-address positions are recalculated when writing `.mrc`.
 Open them with MarcEdit (MarcBreaker) or any MARC tool.
 
 Scope: every current heading in LC's LCSH bulk file (`subjects.madsrdf.jsonld.gz`).
+New and changed headings are found from that file's dates, so the mirror is only
+as current as LC's latest bulk file.
 Genre/Form Terms and children's headings are separate vocabularies and not included.
 
 ## Build it yourself
