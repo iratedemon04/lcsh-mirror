@@ -22,6 +22,7 @@ Everything is kept in data/store.db (SQLite), so a stop never loses work.
 """
 import argparse
 import collections
+import contextlib
 import csv
 import datetime as dt
 import email.utils
@@ -260,7 +261,7 @@ def fetch(c, data, getter=get, sleep=time.sleep):
 # ---------------------------------------------------------------- build
 
 def lccn(rec):
-    f = rec["010"]
+    f = rec.get("010")
     return (f.get("a") or "").strip() if f else ""
 
 
@@ -300,50 +301,61 @@ def build(c, out, date=None):
     os.makedirs(out, exist_ok=True)
     base = os.path.join(out, f"lcsh-{date}")
     prev_date, prev = previous_release(out, date)
-    rows, changes, seen = [], [], set()
-    cmrc = cxml = cxw = None
-    if prev is not None:
-        cmrc = open(os.path.join(out, f"changes-{date}.mrc"), "wb")
-        cxml = open(os.path.join(out, f"changes-{date}.mrcxml"), "wb")
-        cxw = pymarc.XMLWriter(cxml)
-    with open(base + ".mrc", "wb") as mrc, open(base + ".mrcxml", "wb") as xml:
-        xw = pymarc.XMLWriter(xml)
-        for (body,) in c.execute("SELECT xml FROM records JOIN census USING(id) ORDER BY id"):
-            rec = pymarc.parse_xml_to_array(io.BytesIO(body))[0]
-            raw = rec.as_marc()
-            mrc.write(raw)
-            xw.write(rec)
-            row = (lccn(rec), rec["005"].data if rec["005"] else "", heading(rec))
-            rows.append(row)
-            if prev is not None:
-                seen.add(row[0])
-                old = prev.get(row[0])
-                if old is None or old[0] != hashlib.sha1(raw).hexdigest():
-                    cmrc.write(raw)
-                    cxw.write(rec)
-                    changes.append((row[0], "new" if old is None else "changed", row[1], row[2]))
-        xw.close(close_fh=False)
-    rows.sort()
-    write_csv(os.path.join(out, f"manifest-{date}.csv"), ["lccn", "005", "heading"], rows)
     names = [f"lcsh-{date}.mrc", f"lcsh-{date}.mrcxml", f"manifest-{date}.csv"]
     if prev is not None:
-        cxw.close(close_fh=False)
-        cmrc.close()
-        cxml.close()
-        changes.sort()
-        deleted = sorted((k, v[1]) for k, v in prev.items() if k not in seen)
-        write_csv(os.path.join(out, f"changes-{date}.csv"), ["lccn", "status", "005", "heading"], changes)
-        write_csv(os.path.join(out, f"deleted-{date}.csv"), ["lccn", "heading"], deleted)
         names += [f"changes-{date}.mrc", f"changes-{date}.mrcxml", f"changes-{date}.csv", f"deleted-{date}.csv"]
+    # Everything is written as .part and renamed once complete, so a failed build leaves
+    # no truncated file for the next build to compare against or for publish to ship.
+    tmp = {n: os.path.join(out, n + ".part") for n in names + [f"SHA256SUMS-{date}"]}
+    rows, changes, seen = [], [], set()
+    try:
+        with contextlib.ExitStack() as stack:
+            mrc = stack.enter_context(open(tmp[f"lcsh-{date}.mrc"], "wb"))
+            xw = pymarc.XMLWriter(stack.enter_context(open(tmp[f"lcsh-{date}.mrcxml"], "wb")))
+            if prev is not None:
+                cmrc = stack.enter_context(open(tmp[f"changes-{date}.mrc"], "wb"))
+                cxw = pymarc.XMLWriter(stack.enter_context(open(tmp[f"changes-{date}.mrcxml"], "wb")))
+            for (body,) in c.execute("SELECT xml FROM records JOIN census USING(id) ORDER BY id"):
+                rec = pymarc.parse_xml_to_array(io.BytesIO(body))[0]
+                raw = rec.as_marc()
+                mrc.write(raw)
+                xw.write(rec)
+                row = (lccn(rec), rec.get("005").data if rec.get("005") else "", heading(rec))
+                rows.append(row)
+                if prev is not None:
+                    seen.add(row[0])
+                    old = prev.get(row[0])
+                    if old is None or old[0] != hashlib.sha1(raw).hexdigest():
+                        cmrc.write(raw)
+                        cxw.write(rec)
+                        changes.append((row[0], "new" if old is None else "changed", row[1], row[2]))
+            xw.close(close_fh=False)
+            if prev is not None:
+                cxw.close(close_fh=False)
+        rows.sort()
+        write_csv(tmp[f"manifest-{date}.csv"], ["lccn", "005", "heading"], rows)
+        if prev is not None:
+            changes.sort()
+            deleted = sorted((k, v[1]) for k, v in prev.items() if k not in seen)
+            write_csv(tmp[f"changes-{date}.csv"], ["lccn", "status", "005", "heading"], changes)
+            write_csv(tmp[f"deleted-{date}.csv"], ["lccn", "heading"], deleted)
+        with open(tmp[f"SHA256SUMS-{date}"], "w", encoding="utf-8") as fh:
+            for n in names:
+                h = hashlib.sha256()
+                with open(tmp[n], "rb") as f:
+                    for chunk in iter(lambda: f.read(1 << 20), b""):
+                        h.update(chunk)
+                fh.write(f"{h.hexdigest()}  {n}\n")
+    except BaseException:
+        for p in tmp.values():
+            if os.path.exists(p):
+                os.remove(p)
+        raise
+    for n, p in tmp.items():
+        os.replace(p, os.path.join(out, n))
+    if prev is not None:
         new = sum(1 for x in changes if x[1] == "new")
         print(f"since {prev_date}: {new} new, {len(changes) - new} changed, {len(deleted)} deleted")
-    with open(os.path.join(out, f"SHA256SUMS-{date}"), "w", encoding="utf-8") as fh:
-        for n in names:
-            h = hashlib.sha256()
-            with open(os.path.join(out, n), "rb") as f:
-                for chunk in iter(lambda: f.read(1 << 20), b""):
-                    h.update(chunk)
-            fh.write(f"{h.hexdigest()}  {n}\n")
     gone = c.execute("SELECT count(*) FROM gone JOIN census USING(id)").fetchone()[0]
     print(f"{len(rows)} LCSH records written to {base}.*  ({gone} listed by LC but not served as MARC)")
     return True

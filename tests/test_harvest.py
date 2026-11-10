@@ -9,6 +9,7 @@ import re
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 import pymarc
 
@@ -203,6 +204,26 @@ class BuildTests(Base):
                 digest, name = line.split("  ")
                 with open(os.path.join(out, name), "rb") as f:
                     self.assertEqual(hashlib.sha256(f.read()).hexdigest(), digest)
+
+    def test_record_without_005_or_010_still_builds(self):
+        self.fetch()
+        rec = pymarc.parse_xml_to_array(io.BytesIO(RECORDS["sh85076432"]))[0]
+        rec.remove_fields("005", "010")
+        self.c.execute("UPDATE records SET xml=? WHERE id='sh85076432'", (pymarc.record_to_xml(rec, namespace=True),))
+        out = os.path.join(self.data, "release")
+        self.assertTrue(harvest.build(self.c, out, date="20261020"))
+        with open(os.path.join(out, "manifest-20261020.csv"), encoding="utf-8") as fh:
+            self.assertIn(["", "", "Libel and slander"], list(csv.reader(fh)))
+
+    def test_failed_build_leaves_no_files(self):
+        self.fetch()
+        out = os.path.join(self.data, "release")
+        harvest.build(self.c, out, date="20261101")
+        before = sorted(os.listdir(out))
+        with mock.patch.object(harvest, "heading", side_effect=RuntimeError("disk full")):
+            with self.assertRaises(RuntimeError):
+                harvest.build(self.c, out, date="20261108")
+        self.assertEqual(sorted(os.listdir(out)), before)
 
     def test_second_release_lists_new_changed_and_deleted(self):
         self.fetch()

@@ -5,6 +5,8 @@ import sys
 import tempfile
 import unittest
 
+import pymarc
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import harvest  # noqa: E402
 import load  # noqa: E402
@@ -38,6 +40,17 @@ class LoadTests(unittest.TestCase):
             db = os.path.join(d, "new", "lcsh.db")                       # folder made on demand
             self.assertEqual(load.load(src + ".gz", db), 3)
 
+
+    def test_skips_a_record_without_010(self):
+        with tempfile.TemporaryDirectory() as d:
+            make_release(d, "20261020")
+            src = os.path.join(d, "release", "lcsh-20261020.mrc")
+            with open(src, "rb") as fh:
+                recs = list(pymarc.MARCReader(fh, to_unicode=True, force_utf8=True))
+            recs[0].remove_fields("010")
+            with open(src, "wb") as fh:
+                fh.write(b"".join(r.as_marc() for r in recs))
+            self.assertEqual(load.load(src, os.path.join(d, "lcsh.db")), 2)
 
 if __name__ == "__main__":
     unittest.main()

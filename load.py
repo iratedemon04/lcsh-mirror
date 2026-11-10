@@ -54,7 +54,10 @@ def load(mrc, db):
     n = 0
     with (gzip.open if mrc.endswith(".gz") else open)(mrc, "rb") as fh:
         for rec in pymarc.MARCReader(fh, to_unicode=True, force_utf8=True):
-            lccn = rec["010"]["a"].strip()
+            f = rec.get("010")
+            lccn = (f.get("a") or "").strip() if f else ""
+            if not lccn:
+                continue
             h = heading(rec)
             c.execute("INSERT INTO records VALUES(?,?,?)", (lccn, h, rec.as_marc()))
             c.execute("INSERT INTO fts VALUES(?,?,?)", (lccn, h, refs(rec)))
