@@ -37,7 +37,7 @@ def metadata(r):
                  f"{r['deleted']} deleted)")
     desc += (f". Unofficial; not affiliated with or endorsed by the Library of Congress. "
              f"Weekly releases: {PAGE} Code: https://github.com/iratedemon04/lcsh-mirror")
-    return {"title": f"LCSH mirror {d}: Library of Congress Subject Headings (MARC 21)",
+    return {"title": f"LCSH MARC mirror {d}: Library of Congress Subject Headings",
             "mediatype": "data", "date": d, "creator": "Alonso Cossío Vázquez",
             "subject": ["LCSH", "Library of Congress Subject Headings", "MARC 21", "MARCXML",
                         "authority records", "cataloging", "library metadata"],

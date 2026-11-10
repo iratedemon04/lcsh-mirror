@@ -1,4 +1,4 @@
-# LCSH mirror
+# LCSH MARC mirror
 
 A full, current copy of **Library of Congress Subject Headings** as MARC authority
 records, rebuilt weekly from LC's own id.loc.gov service, plus the small script that

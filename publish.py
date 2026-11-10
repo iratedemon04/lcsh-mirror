@@ -210,7 +210,7 @@ def render(out, releases):
                  if len(prev) > SHOW_PREVIOUS else "") or "<p>&ndash;</p>\n")
 
     # README.txt
-    lines = [f"LCSH mirror: {SITE}/lcshmirror/", "",
+    lines = [f"LCSH MARC mirror: {SITE}/lcshmirror/", "",
              "Every Library of Congress Subject Heading as a MARC authority record,",
              "taken from id.loc.gov and rebuilt weekly. Unofficial; not affiliated with",
              "or endorsed by the Library of Congress. Data: public domain (CC0).", "",
@@ -236,7 +236,7 @@ def render(out, releases):
         for r in releases[:FEED])
     write(os.path.join(out, "releases.atom"),
           '<?xml version="1.0" encoding="utf-8"?>\n<feed xmlns="http://www.w3.org/2005/Atom">\n'
-          f"  <title>LCSH mirror releases</title>\n  <id>{SITE}/lcshmirror/</id>\n  <updated>{now}</updated>\n"
+          f"  <title>LCSH MARC mirror releases</title>\n  <id>{SITE}/lcshmirror/</id>\n  <updated>{now}</updated>\n"
           f'  <link href="{SITE}/lcshmirror/"/>\n  <link rel="self" href="{SITE}{URL}releases.atom"/>\n'
           f"  <author><name>Alonso Cossío Vázquez</name></author>\n{entries}</feed>\n")
 
@@ -251,7 +251,7 @@ def render(out, releases):
           f"<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\"><title>Index of {URL}</title></head>\n"
           f"<body>\n<h1>Index of {URL}</h1><hr><pre><a href=\"../\">../</a>\n{listing}</pre><hr>\n"
           f'<p>Read <a href="README.txt">README.txt</a> first. '
-          f'<a href="/lcshmirror/">LCSH mirror</a></p>\n</body></html>\n')
+          f'<a href="/lcshmirror/">LCSH MARC mirror</a></p>\n</body></html>\n')
 
 
 def upload(out, dest):
