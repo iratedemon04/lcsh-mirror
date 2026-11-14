@@ -51,9 +51,15 @@ last changed, adds anything newer from LC's change feed
 (`id.loc.gov/authorities/subjects/feed/1`, a handful of requests), then downloads each new or changed heading as MARCXML from
 `id.loc.gov/authorities/subjects/<id>.marcxml.xml`, one request every 3.1 seconds
 (id.loc.gov's robots.txt asks for 3). The first run fetches everything; after that,
-only what LC changed. A "slow down" answer stops the run; a server hiccup pauses
-5 minutes and retries a few times, then stops. Rerun and it resumes. Please keep
-the pace: it's a shared public service.
+only what LC changed. A "slow down" answer stops the run; a server hiccup (an error,
+a timeout, a page that isn't MARC) pauses 5 minutes and retries a few times, then stops.
+Rerun and it resumes. Please keep the pace: it's a shared public service.
+
+Some safety nets: if the change feed can't be read, the run goes on with the bulk file
+and prints a warning; headings already taken from the feed stay until the bulk file
+catches up. A heading LC answers 404 for is asked for again a week later. And a release
+that would drop more than 500 headings at once is not written (LC removes a handful a
+week, so that many means a bad bulk file); `touch data/allow-deletions` lets one through.
 
 Progress is written to `data/dash/` (`status.json` + a small `index.html`) for a
 dashboard. The build only runs when every heading is fetched.

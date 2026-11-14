@@ -1,4 +1,5 @@
 """Offline tests: no network. Run with  python -m unittest  from the repo root."""
+import contextlib
 import csv
 import gzip
 import hashlib
@@ -167,6 +168,43 @@ class FetchTests(Base):
         self.assertEqual(self.fetch(site), 1)
         self.assertEqual(site.calls, ["sh85148273"])
 
+    def test_an_error_page_is_not_an_answer(self):
+        page = (200, b"<html><body>Down for maintenance</body></html>")
+        self.fetch(Site({"sh85076432": [page]}))            # served once, then the real record
+        self.assertEqual(self.stored(), IDS)
+        self.assertEqual(self.slept.count(harvest.PAUSE), 1)
+        self.assertIsNone(self.c.execute("SELECT 1 FROM gone WHERE id='sh85076432'").fetchone())
+
+    def test_an_error_page_that_stays_stops_the_run(self):
+        page = (200, b"<html><body>Down for maintenance</body></html>")
+        with self.assertRaisesRegex(harvest.Stop, "not a MARC record"):
+            self.fetch(Site({"sh85076432": [page] * (harvest.RETRIES + 1)}))
+        self.assertIsNone(self.c.execute("SELECT 1 FROM gone WHERE id='sh85076432'").fetchone())
+        self.assertEqual(harvest.todo(self.c)[0], "sh85076432")     # still to do: the next run asks again
+
+    def test_a_404_is_asked_again_after_a_while(self):
+        self.fetch(Site({"sh85076432": 404}))               # LC's mistake: the heading exists
+        self.assertNotIn("sh85076432", self.stored())
+        site = Site()
+        self.assertEqual(self.fetch(site), 0)               # the same day: nobody is asked twice
+        self.assertEqual(site.calls, [])
+        self.c.execute("UPDATE gone SET checked='2020-01-01T00:00:00Z' WHERE id='sh85076432'")
+        self.c.execute("UPDATE gone SET checked=NULL WHERE id='sh90000000'")      # a store from before `checked`
+        site = Site()
+        self.fetch(site)
+        self.assertEqual(site.calls, ["sh85076432", "sh90000000"])
+        self.assertEqual(self.stored(), IDS)
+        self.assertIsNone(self.c.execute("SELECT 1 FROM gone WHERE id='sh85076432'").fetchone())
+        self.assertEqual(self.fetch(Site()), 0)
+        self.assertTrue(harvest.build(self.c, os.path.join(self.data, "release"), date="20261020"))
+
+    def test_store_made_before_the_checked_column_still_opens(self):
+        self.c.execute("DROP TABLE gone")
+        self.c.execute("CREATE TABLE gone(id TEXT PRIMARY KEY, reason TEXT, changed TEXT)")
+        self.c.close()
+        self.c = harvest.connect(self.data)
+        self.assertEqual(self.fetch(), 1003)
+
     def test_dashboard_counts_all_time_across_restarts(self):
         with self.assertRaises(harvest.Stop):
             self.fetch(Site({"sh85076432": 429}))        # stops after 1 stored
@@ -250,6 +288,20 @@ class BuildTests(Base):
         with open(os.path.join(out, "SHA256SUMS-20261108"), encoding="utf-8") as fh:
             self.assertEqual(len(fh.read().split("\n")[:-1]), 7)
 
+    def test_refuses_a_release_that_shrinks(self):
+        self.fetch()
+        out = os.path.join(self.data, "release")
+        harvest.build(self.c, out, date="20261101")
+        before = sorted(os.listdir(out))
+        self.c.execute("DELETE FROM census WHERE id IN ('sh85076432', 'sh85148273')")   # a bulk file missing headings
+        with mock.patch.object(harvest, "MAX_DELETED", 1):
+            with self.assertRaisesRegex(harvest.Stop, "2 headings would be deleted"):
+                harvest.build(self.c, out, date="20261108")
+            self.assertEqual(sorted(os.listdir(out)), before)                           # nothing written
+            self.assertTrue(harvest.build(self.c, out, date="20261108", allow_deletions=True))
+        with open(os.path.join(out, "deleted-20261108.csv"), encoding="utf-8") as fh:
+            self.assertEqual(len(list(csv.reader(fh))), 3)
+
     def test_round_trip_is_faithful(self):
         """The .mrc holds exactly what LC sent: same fields, order, values. Only the
         leader's computed positions (record length 00-04, base address 12-16) may differ."""
@@ -289,19 +341,89 @@ class FeedTests(Base):
         self.assertEqual(asked, [1, 2])                      # page 2 is older than the cutoff: stop there
         self.assertEqual(self.slept, [harvest.DELAY])
 
-    def test_a_feed_error_stops_the_run(self):
-        with self.assertRaises(harvest.Stop):
+    def test_a_feed_error_is_retried_then_given_up(self):
+        with self.assertRaisesRegex(harvest.Stop, "HTTP 503"):
             harvest.read_feed("2026-10-09", getter=lambda url: (503, b""), sleep=self.slept.append)
+        self.assertEqual(self.slept.count(harvest.PAUSE), harvest.RETRIES)
+        answers = [(503, b""), (200, feed_page([("sh85076432", "2026-10-01")]))]
+        got = harvest.read_feed("2026-10-09", getter=lambda url: answers.pop(0), sleep=self.slept.append)
+        self.assertEqual(got, [])                            # one hiccup, then the page
 
-    def test_an_empty_first_page_stops_the_run(self):
-        with self.assertRaises(harvest.Stop):
+    def test_an_empty_page_is_an_error_not_the_end(self):
+        with self.assertRaisesRegex(harvest.Stop, "format"):
             harvest.read_feed("2026-10-09", getter=lambda url: (200, b"<feed></feed>"), sleep=self.slept.append)
+        pages = [feed_page([("sh85076432", "2026-11-02")]), b"<feed></feed>"]
+        with self.assertRaisesRegex(harvest.Stop, "before reaching"):
+            harvest.read_feed("2026-10-09", getter=lambda url: (200, pages.pop(0)), sleep=self.slept.append)
+
+    def test_slow_down_from_the_feed_stops_the_whole_run(self):
+        with self.assertRaises(harvest.SlowDown):
+            harvest.read_feed("2026-10-09", getter=lambda url: (429, b""), sleep=self.slept.append)
+        self.assertEqual(self.slept, [])                     # no retry after a slow-down
+
+        def feed(since):
+            raise harvest.SlowDown("change feed page 1: HTTP 429")
+        with self.assertRaises(harvest.SlowDown):
+            harvest.census(self.c, self.data, fetch_dump=None, feed=feed)
 
     def test_no_feed_file_switches_the_feed_off(self):
         open(os.path.join(self.data, "no-feed"), "w").close()
         self.feed = [("sh2025000001", "2026-11-10")]
-        self.dump(1000)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.dump(1000)
         self.assertIsNone(self.c.execute("SELECT 1 FROM census WHERE id='sh2025000001'").fetchone())
+        self.assertIn("WARNING: change feed switched off", out.getvalue())
+
+    def held_feed_heading(self):
+        """A heading only the feed knows about (newer than the bulk file), fetched and in a release."""
+        self.fetch()
+        extra = RECORDS["sh85076432"].replace(b"sh85076432", b"sh2025000001").replace(b"sh 85076432", b"sh2025000001")
+        self.feed = [("sh2025000001", "2026-11-10")]
+        self.dump(1000)
+        self.fetch(Site({"sh2025000001": (200, extra)}))
+        out = os.path.join(self.data, "release")
+        harvest.build(self.c, out, date="20261107")
+        return out
+
+    def broken_feed(self, since):
+        raise harvest.Stop("change feed page 1: HTTP 503 after 3 retries")
+
+    def test_feed_outage_does_not_stop_the_run_or_drop_headings(self):
+        out = self.held_feed_heading()
+        said = io.StringIO()
+        with contextlib.redirect_stdout(said):
+            total = harvest.census(self.c, self.data, fetch_dump=None, feed=self.broken_feed)
+        self.assertEqual(total, 1004)                        # the feed-only heading is still listed
+        self.assertIn("WARNING: change feed not read (change feed page 1: HTTP 503", said.getvalue())
+        self.assertEqual(self.fetch(Site()), 0)
+        self.assertTrue(harvest.build(self.c, out, date="20261114"))
+        with open(os.path.join(out, "deleted-20261114.csv"), encoding="utf-8") as fh:
+            self.assertEqual(list(csv.reader(fh))[1:], [])
+
+    def test_feed_switched_off_does_not_drop_headings_either(self):
+        self.held_feed_heading()
+        open(os.path.join(self.data, "no-feed"), "w").close()
+        self.assertEqual(self.dump(1000), 1004)
+
+    def test_feed_only_heading_leaves_once_the_bulk_file_is_newer_and_lacks_it(self):
+        self.held_feed_heading()
+        open(os.path.join(self.data, "no-feed"), "w").close()
+        self.dump(1000, dates={"sh85148273": "2026-11-10T09:00:00"})     # same day: the bulk file may predate it
+        self.assertIsNotNone(self.c.execute("SELECT 1 FROM census WHERE id='sh2025000001'").fetchone())
+        self.dump(1000, dates={"sh85148273": "2026-11-12T09:00:00"})     # newer, and the heading is not in it
+        self.assertIsNone(self.c.execute("SELECT 1 FROM census WHERE id='sh2025000001'").fetchone())
+
+    def test_a_census_that_fails_leaves_the_old_one_whole(self):
+        self.held_feed_heading()
+
+        def feed(since):
+            raise harvest.SlowDown("change feed page 1: HTTP 429")
+        write_dump(os.path.join(self.data, "subjects.madsrdf.jsonld.gz"),
+                   [(f"sh9{n:07d}", "2020-01-01T00:00:00") for n in range(2000)])
+        with self.assertRaises(harvest.Stop):
+            harvest.census(self.c, self.data, fetch_dump=None, feed=feed)
+        self.assertEqual(self.c.execute("SELECT count(*) FROM census").fetchone()[0], 1004)
 
     def test_feed_adds_headings_newer_than_the_bulk_file(self):
         self.fetch()

@@ -17,8 +17,12 @@ How it works:
     as MARCXML from id.loc.gov/authorities/subjects/<id>.marcxml.xml, one request
     every DELAY seconds (id.loc.gov's robots.txt asks for Crawl-delay: 3). The
     first run fetches everything (~16 days); later runs only what changed.
-  * "slow down" answers (403/429) stop the run. Server hiccups (5xx, timeouts)
-    pause 5 minutes and retry, at most RETRIES times, then stop. Rerun to resume.
+  * "slow down" answers (403/429) stop the run. Server hiccups (5xx, timeouts, a
+    page that is not MARC) pause 5 minutes and retry, at most RETRIES times, then
+    stop. Rerun to resume. A 404 is asked again RECHECK days later.
+  * the change feed is optional: if it cannot be read the run goes on with the bulk
+    file and prints a WARNING. A release that would drop more than MAX_DELETED
+    headings is not written.
 
 Everything is kept in data/store.db (SQLite), so a stop never loses work.
 """
@@ -52,19 +56,25 @@ DELAY = 3.1          # seconds between requests (robots.txt: Crawl-delay: 3)
 PAUSE = 300          # after a server hiccup
 RETRIES = 3
 TIMEOUT = 60
+MAX_DELETED = 500    # a release that would drop more headings than this is not written (see build)
+RECHECK = 6          # days before a heading LC answered 404 for is asked for again
 UA = "lcsh-mirror/1.0 (+https://bibliotecaalonsocossio.com/lcshmirror/)"
 ID = re.compile(r"/authorities/subjects/(sh\d+)$")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS census(id TEXT PRIMARY KEY, changed TEXT);
 CREATE TABLE IF NOT EXISTS records(id TEXT PRIMARY KEY, xml BLOB, changed TEXT, fetched TEXT);
-CREATE TABLE IF NOT EXISTS gone(id TEXT PRIMARY KEY, reason TEXT, changed TEXT);
+CREATE TABLE IF NOT EXISTS gone(id TEXT PRIMARY KEY, reason TEXT, changed TEXT, checked TEXT);
 CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT);
 """
 
 
 class Stop(Exception):
     """Something needs a human; stop and say why."""
+
+
+class SlowDown(Stop):
+    """LC answered 403 or 429: make no more requests in this run."""
 
 
 def now():
@@ -76,6 +86,8 @@ def connect(data):
     c = sqlite3.connect(os.path.join(data, "store.db"), isolation_level=None)
     c.execute("PRAGMA journal_mode=WAL")
     c.executescript(SCHEMA)
+    if "checked" not in [r[1] for r in c.execute("PRAGMA table_info(gone)")]:
+        c.execute("ALTER TABLE gone ADD COLUMN checked TEXT")      # stores made before 2026-11-14
     return c
 
 
@@ -151,40 +163,73 @@ def read_feed(since, getter=get_url, sleep=time.sleep):
     for page in range(1, FEED_PAGES + 1):
         if page > 1:
             sleep(DELAY)
-        status, body = getter(FEED.format(page))
-        if status != 200:
-            raise Stop(f"change feed page {page}: HTTP {status}")
+        attempt = 0
+        while True:
+            status, body = getter(FEED.format(page))
+            if status == 200:
+                break
+            if status in (403, 429):
+                raise SlowDown(f"change feed page {page}: HTTP {status}, LC asked us to slow down")
+            if status == 0 and offline(body):      # our own connection: wait for it, as fetch does
+                sleep(PAUSE)
+                continue
+            if attempt == RETRIES:
+                raise Stop(f"change feed page {page}: HTTP {status} after {RETRIES} retries")
+            attempt += 1
+            sleep(PAUSE)
         entries = [(i.decode(), d.decode()) for i, d in ENTRY.findall(body)]
-        if page == 1 and not entries:
-            raise Stop("change feed page 1 has no entries; LC may have changed its format")
+        if not entries:
+            raise Stop(f"change feed page {page} has no entries" +
+                       ("; LC may have changed its format" if page == 1 else f" before reaching {since}"))
         for id_, date in entries:
             if re.fullmatch(r"sh\d+", id_) and date >= since and date > found.get(id_, ""):
                 found[id_] = date
-        if not entries or min(d for _, d in entries) < since:
+        if min(d for _, d in entries) < since:
             return sorted(found.items())
     raise Stop(f"change feed: {FEED_PAGES} pages read without reaching {since}")
 
 
 def census(c, data, fetch_dump=download, feed=None):
     """Refresh the list of headings: LC's bulk file (downloaded at most once a week), plus
-    whatever LC's change feed says is newer than the bulk file. An empty file named
-    no-feed in the data directory switches the feed off (bulk file only, as before 2026-11-14)."""
+    whatever LC's change feed says is newer than the bulk file.
+
+    The feed is optional. If it cannot be read, or an empty file named no-feed in the data
+    directory switches it off, the run goes on with the bulk file and prints a WARNING line.
+    Headings we already hold that only the feed knew about are kept either way, until the bulk
+    file is newer than they are: from then on the bulk file decides whether they exist."""
     path = os.path.join(data, "subjects.madsrdf.jsonld.gz")
     if not os.path.exists(path) or time.time() - os.path.getmtime(path) > 6 * 86400:
         fetch_dump(DUMP, path)
     rows = list(read_dump(path))
     if len(rows) < 1000:
         raise Stop(f"bulk file lists only {len(rows)} headings; refusing to use it")
+    newest = max(d for _, d in rows)[:10]
+    kept, newer, warning = [], [], None
+    if re.fullmatch(r"\d{4}-\d\d-\d\d", newest):
+        in_bulk = {i for i, _ in rows}
+        kept = [r for r in c.execute("SELECT census.id, census.changed FROM census JOIN records USING(id) "
+                                     "WHERE substr(census.changed,1,10) >= ?", (newest,)) if r[0] not in in_bulk]
+        if os.path.exists(os.path.join(data, "no-feed")):
+            warning = "change feed switched off (data/no-feed)"
+        else:
+            since = (dt.date.fromisoformat(newest) - dt.timedelta(days=FEED_OVERLAP)).isoformat()
+            try:
+                newer = (feed or read_feed)(since)
+            except SlowDown:
+                raise
+            except Stop as e:
+                warning = f"change feed not read ({e})"
+    # everything was read before the table is touched, so a failure above leaves the old census whole
     c.execute("BEGIN")
     c.execute("DELETE FROM census")
     c.executemany("INSERT OR REPLACE INTO census VALUES(?,?)", rows)
+    c.executemany("INSERT OR IGNORE INTO census VALUES(?,?)", kept)
+    # a feed date only counts when it is a later day than the bulk file's date for that heading
+    c.executemany("INSERT INTO census VALUES(?,?) ON CONFLICT(id) DO UPDATE SET changed=excluded.changed "
+                  "WHERE substr(census.changed,1,10) < excluded.changed", newer)
     c.execute("COMMIT")
-    newest = max(d for _, d in rows)[:10]
-    if re.fullmatch(r"\d{4}-\d\d-\d\d", newest) and not os.path.exists(os.path.join(data, "no-feed")):
-        since = (dt.date.fromisoformat(newest) - dt.timedelta(days=FEED_OVERLAP)).isoformat()
-        # a feed date only counts when it is a later day than the bulk file's date for that heading
-        c.executemany("INSERT INTO census VALUES(?,?) ON CONFLICT(id) DO UPDATE SET changed=excluded.changed "
-                      "WHERE substr(census.changed,1,10) < excluded.changed", (feed or read_feed)(since))
+    if warning:
+        print(f"WARNING: {warning}; nothing LC changed after {newest} is picked up this run")
     total = c.execute("SELECT count(*) FROM census").fetchone()[0]
     if os.path.exists(path + ".date"):
         with open(path + ".date", encoding="utf-8") as fh:
@@ -223,6 +268,19 @@ def todo(c):
         "SELECT census.id FROM census LEFT JOIN records USING(id) LEFT JOIN gone g USING(id) "
         "WHERE (records.id IS NULL OR records.changed < census.changed) "
         "  AND (g.id IS NULL OR g.changed < census.changed) ORDER BY census.id")]
+
+
+def recheck(c):
+    """Headings LC answered 404 for (or something that was not MARC) at least RECHECK days ago.
+    Asked again, so one wrong answer from LC never drops a heading for good."""
+    before = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=RECHECK)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return [r[0] for r in c.execute(
+        "SELECT g.id FROM gone g JOIN census USING(id) WHERE (g.reason LIKE 'HTTP 4%' OR g.reason = 'not a MARC record') "
+        "AND (g.checked IS NULL OR g.checked < ?) ORDER BY g.id", (before,))]
+
+
+def is_marc(xml):
+    return b"datafield" in xml and b"<html" not in xml[:500].lower()
 
 
 def heading_of(xml):
@@ -264,13 +322,14 @@ class Progress:
 
 def fetch(c, data, getter=get, sleep=time.sleep):
     ids = todo(c)
+    work = ids + [i for i in recheck(c) if i not in set(ids)]
     changed = dict(c.execute("SELECT id, changed FROM census"))
     total = len(changed)
-    base = total - len(ids)
+    base = total - len(work)
     p = Progress(data, total, base)
     p.write()
     last = 0.0
-    for i, id_ in enumerate(ids):
+    for i, id_ in enumerate(work):
         attempt, offline_since = 0, None
         while True:
             wait = DELAY - (time.monotonic() - last)
@@ -278,7 +337,7 @@ def fetch(c, data, getter=get, sleep=time.sleep):
                 sleep(wait)
             last = time.monotonic()
             status, body = getter(id_)
-            if status == 200 or status in (403, 404, 410, 429):
+            if status in (403, 404, 410, 429) or (status == 200 and (deleted(body) or is_marc(body))):
                 break
             if status == 0 and offline(body):
                 # our own internet/DNS is down: says nothing about LC, so just wait for it
@@ -288,28 +347,29 @@ def fetch(c, data, getter=get, sleep=time.sleep):
                 p.write(state=f"waiting for network since {offline_since}")
                 sleep(PAUSE)
                 continue
-            p.error(f"{id_}: {'network ' + body.decode()[:80] if status == 0 else f'HTTP {status}'}")
+            # a 200 that is not a MARC record (an error page, say) is LC having a bad moment, not an answer
+            what = "HTTP 200 but not a MARC record" if status == 200 else f"HTTP {status}"
+            p.error(f"{id_}: {'network ' + body.decode()[:80] if status == 0 else what}")
             if attempt == RETRIES:
                 p.write(state="stopped")
-                raise Stop(f"{id_}: still failing after {RETRIES} retries (HTTP {status})")
+                raise Stop(f"{id_}: still failing after {RETRIES} retries ({what})")
             attempt += 1
-            p.write(state=f"paused after HTTP {status}, retry {attempt}/{RETRIES}")
+            p.write(state=f"paused after {what}, retry {attempt}/{RETRIES}")
             sleep(PAUSE)
         if status in (403, 429):
             p.error(f"{id_}: HTTP {status}: LC asks us to slow down")
             p.write(state="stopped")
-            raise Stop(f"{id_}: HTTP {status}, LC asked us to slow down")
+            raise SlowDown(f"{id_}: HTTP {status}, LC asked us to slow down")
         if status == 200 and deleted(body):
-            c.execute("INSERT OR REPLACE INTO gone VALUES(?,?,?)", (id_, DELETED, changed[id_]))
+            c.execute("INSERT OR REPLACE INTO gone VALUES(?,?,?,?)", (id_, DELETED, changed[id_], now()))
             c.execute("DELETE FROM records WHERE id=?", (id_,))
             last_rec = {"id": id_, "heading": f"(deleted at LC: {heading_of(body)})", "at": now()}
-        elif status == 200 and b"datafield" in body and b"<html" not in body[:500].lower():
+        elif status == 200:
             c.execute("INSERT OR REPLACE INTO records VALUES(?,?,?,?)", (id_, body, changed[id_], now()))
             c.execute("DELETE FROM gone WHERE id=?", (id_,))
             last_rec = {"id": id_, "heading": heading_of(body), "at": now()}
         else:
-            c.execute("INSERT OR REPLACE INTO gone VALUES(?,?,?)",
-                      (id_, f"HTTP {status}" if status != 200 else "not a MARC record", changed[id_]))
+            c.execute("INSERT OR REPLACE INTO gone VALUES(?,?,?,?)", (id_, f"HTTP {status}", changed[id_], now()))
             last_rec = {"id": id_, "heading": f"(skipped: HTTP {status})", "at": now()}
         p.write(state="fetching", done=base + i + 1, last=last_rec)
     p.write(state="fetched", done=total)
@@ -347,11 +407,13 @@ def write_csv(path, header, rows):
         w.writerows(rows)
 
 
-def build(c, out, date=None):
+def build(c, out, date=None, allow_deletions=False):
     """Write a release from every stored heading in the current census.
     Complete when every heading in the census is either stored and up to date, or gone.
     When an older release exists, also write what changed since it: changes-DATE.mrc/.mrcxml/.csv
-    (new or changed records; changed = different MARC content) and deleted-DATE.csv."""
+    (new or changed records; changed = different MARC content) and deleted-DATE.csv.
+    A release that would drop more than MAX_DELETED headings is not written, unless
+    allow_deletions: LC removes a handful a week, so thousands means a bad bulk file."""
     if todo(c):
         print(f"INCOMPLETE: {len(todo(c))} headings not fetched yet")
         return False
@@ -395,6 +457,9 @@ def build(c, out, date=None):
         if prev is not None:
             changes.sort()
             deleted = sorted((k, v[1]) for k, v in prev.items() if k not in seen)
+            if len(deleted) > MAX_DELETED and not allow_deletions:
+                raise Stop(f"{len(deleted)} headings would be deleted since {prev_date} (limit {MAX_DELETED}); "
+                           "no release written. If LC really removed them: touch data/allow-deletions and run again")
             write_csv(tmp[f"changes-{date}.csv"], ["lccn", "status", "005", "heading"], changes)
             write_csv(tmp[f"deleted-{date}.csv"], ["lccn", "heading"], deleted)
         with open(tmp[f"SHA256SUMS-{date}"], "w", encoding="utf-8") as fh:
@@ -431,7 +496,11 @@ def main():
         if a.step in ("fetch", "all"):
             print(f"fetched {fetch(c, a.data)} new or changed headings")
         if a.step in ("build", "all"):
-            sys.exit(0 if build(c, os.path.join(a.data, "release")) else 2)
+            flag = os.path.join(a.data, "allow-deletions")      # one-time OK for a release that shrinks a lot
+            if not build(c, os.path.join(a.data, "release"), allow_deletions=os.path.exists(flag)):
+                sys.exit(2)
+            if os.path.exists(flag):
+                os.remove(flag)
     except Stop as e:
         sys.exit(f"stopped: {e}\nrerun later to resume.")
 
