@@ -198,7 +198,7 @@ def census(c, data, fetch_dump=download, feed=None):
     Headings we already hold that only the feed knew about are kept either way, until the bulk
     file is newer than they are: from then on the bulk file decides whether they exist."""
     path = os.path.join(data, "subjects.madsrdf.jsonld.gz")
-    if not os.path.exists(path) or time.time() - os.path.getmtime(path) > 6 * 86400:
+    if not os.path.exists(path) or time.time() - os.path.getmtime(path) > 5 * 86400:   # a late run one week must not make the next one skip it
         fetch_dump(DUMP, path)
     rows = list(read_dump(path))
     if len(rows) < 1000:
