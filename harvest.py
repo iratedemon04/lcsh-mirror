@@ -10,7 +10,9 @@ a release: MARC (.mrc), MARCXML (.mrcxml), a manifest and checksums.
 
 How it works:
   * census: LC's weekly bulk file (subjects.madsrdf.jsonld.gz) lists every heading
-    and when it last changed. That's the list of what should exist.
+    and when it last changed. That's the list of what should exist. The bulk file
+    can be weeks behind the live site, so LC's Atom feed of recent changes
+    (id.loc.gov/authorities/subjects/feed/N) adds what is newer than it.
   * fetch: each heading that's new, or changed since we fetched it, is downloaded
     as MARCXML from id.loc.gov/authorities/subjects/<id>.marcxml.xml, one request
     every DELAY seconds (id.loc.gov's robots.txt asks for Crawl-delay: 3). The
@@ -43,6 +45,9 @@ import pymarc
 
 DUMP = "https://id.loc.gov/download/authorities/subjects.madsrdf.jsonld.gz"
 RECORD = "https://id.loc.gov/authorities/subjects/{}.marcxml.xml"
+FEED = "https://id.loc.gov/authorities/subjects/feed/{}"
+FEED_OVERLAP = 7     # days of the feed re-read before the bulk file's newest change
+FEED_PAGES = 100     # 100 headings a page; more than this means something is off
 DELAY = 3.1          # seconds between requests (robots.txt: Crawl-delay: 3)
 PAUSE = 300          # after a server hiccup
 RETRIES = 3
@@ -123,8 +128,44 @@ def read_dump(path):
                     yield m.group(1), max(dates, default="")
 
 
-def census(c, data, fetch_dump=download):
-    """Refresh the list of headings from LC's bulk file (downloaded at most once a week)."""
+def get_url(url, opener=urllib.request.urlopen):
+    """(status, body) for any id.loc.gov URL. Network errors come back as status 0."""
+    req = urllib.request.Request(url, headers={"User-Agent": UA})
+    try:
+        with opener(req, timeout=TIMEOUT) as r:
+            return r.status, r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, b""
+    except Exception as e:
+        return 0, repr(e).encode()
+
+
+ENTRY = re.compile(rb"<entry>.*?<id>info:lc/authorities/subjects/([^<]+)</id>.*?<updated>(\d{4}-\d\d-\d\d)", re.S)
+
+
+def read_feed(since, getter=get_url, sleep=time.sleep):
+    """(id, date) for every heading LC's Atom feed lists as changed on or after `since`
+    (YYYY-MM-DD). The feed is newest first, 100 a page; read until a page reaches `since`.
+    Entries that are not headings (e.g. sh...-781 subdivision forms) are skipped."""
+    found = {}
+    for page in range(1, FEED_PAGES + 1):
+        if page > 1:
+            sleep(DELAY)
+        status, body = getter(FEED.format(page))
+        if status != 200:
+            raise Stop(f"change feed page {page}: HTTP {status}")
+        entries = [(i.decode(), d.decode()) for i, d in ENTRY.findall(body)]
+        for id_, date in entries:
+            if re.fullmatch(r"sh\d+", id_) and date >= since and date > found.get(id_, ""):
+                found[id_] = date
+        if not entries or min(d for _, d in entries) < since:
+            return sorted(found.items())
+    raise Stop(f"change feed: {FEED_PAGES} pages read without reaching {since}")
+
+
+def census(c, data, fetch_dump=download, feed=None):
+    """Refresh the list of headings: LC's bulk file (downloaded at most once a week), plus
+    whatever LC's change feed says is newer than the bulk file."""
     path = os.path.join(data, "subjects.madsrdf.jsonld.gz")
     if not os.path.exists(path) or time.time() - os.path.getmtime(path) > 6 * 86400:
         fetch_dump(DUMP, path)
@@ -135,24 +176,34 @@ def census(c, data, fetch_dump=download):
     c.execute("DELETE FROM census")
     c.executemany("INSERT OR REPLACE INTO census VALUES(?,?)", rows)
     c.execute("COMMIT")
+    newest = max(d for _, d in rows)[:10]
+    if re.fullmatch(r"\d{4}-\d\d-\d\d", newest):
+        since = (dt.date.fromisoformat(newest) - dt.timedelta(days=FEED_OVERLAP)).isoformat()
+        # a feed date only counts when it is a later day than the bulk file's date for that heading
+        c.executemany("INSERT INTO census VALUES(?,?) ON CONFLICT(id) DO UPDATE SET changed=excluded.changed "
+                      "WHERE substr(census.changed,1,10) < excluded.changed", (feed or read_feed)(since))
+    total = c.execute("SELECT count(*) FROM census").fetchone()[0]
     if os.path.exists(path + ".date"):
         with open(path + ".date", encoding="utf-8") as fh:
-            record_history(data, fh.read().strip(), len(rows), len(todo(c)))
-    return len(rows)
+            record_history(data, fh.read().strip(), total, len(todo(c)))
+    return total
 
 
 # ---------------------------------------------------------------- fetch
 
 def get(id_, opener=urllib.request.urlopen):
     """(status, body) for one record. Network errors come back as status 0."""
-    req = urllib.request.Request(RECORD.format(id_), headers={"User-Agent": UA})
-    try:
-        with opener(req, timeout=TIMEOUT) as r:
-            return r.status, r.read()
-    except urllib.error.HTTPError as e:
-        return e.code, b""
-    except Exception as e:
-        return 0, repr(e).encode()
+    return get_url(RECORD.format(id_), opener)
+
+
+DELETED = "deleted at LC"
+
+
+def deleted(xml):
+    """True when LC serves the record with leader/05 = d (deleted). The bulk file drops these;
+    the change feed still lists them."""
+    m = re.search(rb"<(?:marcxml:)?leader[^>]*>.{5}(.)", xml)
+    return bool(m) and m.group(1) == b"d"
 
 
 OFFLINE = (b"name resolution", b"Name or service not known", b"Network is unreachable", b"No route to host")
@@ -245,7 +296,11 @@ def fetch(c, data, getter=get, sleep=time.sleep):
             p.error(f"{id_}: HTTP {status}: LC asks us to slow down")
             p.write(state="stopped")
             raise Stop(f"{id_}: HTTP {status}, LC asked us to slow down")
-        if status == 200 and b"datafield" in body and b"<html" not in body[:500].lower():
+        if status == 200 and deleted(body):
+            c.execute("INSERT OR REPLACE INTO gone VALUES(?,?,?)", (id_, DELETED, changed[id_]))
+            c.execute("DELETE FROM records WHERE id=?", (id_,))
+            last_rec = {"id": id_, "heading": f"(deleted at LC: {heading_of(body)})", "at": now()}
+        elif status == 200 and b"datafield" in body and b"<html" not in body[:500].lower():
             c.execute("INSERT OR REPLACE INTO records VALUES(?,?,?,?)", (id_, body, changed[id_], now()))
             c.execute("DELETE FROM gone WHERE id=?", (id_,))
             last_rec = {"id": id_, "heading": heading_of(body), "at": now()}
@@ -356,7 +411,7 @@ def build(c, out, date=None):
     if prev is not None:
         new = sum(1 for x in changes if x[1] == "new")
         print(f"since {prev_date}: {new} new, {len(changes) - new} changed, {len(deleted)} deleted")
-    gone = c.execute("SELECT count(*) FROM gone JOIN census USING(id)").fetchone()[0]
+    gone = c.execute("SELECT count(*) FROM gone JOIN census USING(id) WHERE reason != ?", (DELETED,)).fetchone()[0]
     print(f"{len(rows)} LCSH records written to {base}.*  ({gone} listed by LC but not served as MARC)")
     return True
 

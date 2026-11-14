@@ -25,9 +25,9 @@ to LC's MARCXML: the MARCXML is re-serialized, and the leader's computed
 length/base-address positions are recalculated when writing `.mrc`.
 Open them with MarcEdit (MarcBreaker) or any MARC tool.
 
-Scope: every current heading in LC's LCSH bulk file (`subjects.madsrdf.jsonld.gz`).
-New and changed headings are found from that file's dates, so the mirror is only
-as current as LC's latest bulk file.
+Scope: every current heading in LC's LCSH bulk file (`subjects.madsrdf.jsonld.gz`),
+plus the headings LC's change feed lists as newer. The bulk file can be weeks behind
+id.loc.gov; the feed closes that gap.
 Genre/Form Terms and children's headings are separate vocabularies and not included.
 
 ## Build it yourself
@@ -47,7 +47,8 @@ python publish.py [user@host:/path/]   # optional: gzip + latest.json, then rsyn
 ```
 
 `harvest.py` reads LC's weekly bulk file to learn which headings exist and when each
-last changed, then downloads each new or changed heading as MARCXML from
+last changed, adds anything newer from LC's change feed
+(`id.loc.gov/authorities/subjects/feed/1`, a handful of requests), then downloads each new or changed heading as MARCXML from
 `id.loc.gov/authorities/subjects/<id>.marcxml.xml`, one request every 3.1 seconds
 (id.loc.gov's robots.txt asks for 3). The first run fetches everything; after that,
 only what LC changed. A "slow down" answer stops the run; a server hiccup pauses

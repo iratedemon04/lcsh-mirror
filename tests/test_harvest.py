@@ -66,6 +66,7 @@ class Base(unittest.TestCase):
         self.data = self.tmp.name
         self.c = harvest.connect(self.data)
         self.slept = []
+        self.feed = []          # what LC's change feed says: [(id, "YYYY-MM-DD")]
         self.dump(1000)
 
     def tearDown(self):
@@ -79,7 +80,8 @@ class Base(unittest.TestCase):
         rows += [(f"sh9{n:07d}", "2020-01-01T00:00:00") for n in range(padding)]
         path = os.path.join(self.data, "subjects.madsrdf.jsonld.gz")
         write_dump(path, rows, deprecated)
-        return harvest.census(self.c, self.data, fetch_dump=lambda url, p: self.fail("should not download"))
+        return harvest.census(self.c, self.data, fetch_dump=lambda url, p: self.fail("should not download"),
+                              feed=lambda since: self.feed)
 
     def fetch(self, site=None):
         return harvest.fetch(self.c, self.data, getter=site or Site(), sleep=self.slept.append)
@@ -263,12 +265,78 @@ class BuildTests(Base):
                 self.assertEqual([str(f) for f in a.get_fields()], [str(f) for f in b.get_fields()])
 
 
+def feed_page(entries):
+    """An Atom page in LC's shape."""
+    return ("<feed>" + "".join(
+        f"<entry>\n<title>x</title>\n<id>info:lc/authorities/subjects/{i}</id>\n"
+        f"<updated>{d}T00:00:00-04:00</updated>\n<dcterms:created>1990-01-01T00:00:00-04:00</dcterms:created>\n</entry>"
+        for i, d in entries) + "</feed>").encode()
+
+
+class FeedTests(Base):
+    def test_reads_pages_until_one_reaches_the_cutoff(self):
+        pages = {1: feed_page([("sh2025000001", "2026-11-10"), ("sh2024002184-781", "2026-11-10"),
+                               ("sh85076432", "2026-11-02")]),
+                 2: feed_page([("sh85076432", "2026-10-20"), ("sh85148273", "2026-10-01")]),
+                 3: feed_page([("sh2007005138", "2026-09-01")])}
+        asked = []
+
+        def getter(url):
+            asked.append(int(url.rsplit("/", 1)[1]))
+            return 200, pages[asked[-1]]
+        got = harvest.read_feed("2026-10-09", getter=getter, sleep=self.slept.append)
+        self.assertEqual(got, [("sh2025000001", "2026-11-10"), ("sh85076432", "2026-11-02")])
+        self.assertEqual(asked, [1, 2])                      # page 2 is older than the cutoff: stop there
+        self.assertEqual(self.slept, [harvest.DELAY])
+
+    def test_a_feed_error_stops_the_run(self):
+        with self.assertRaises(harvest.Stop):
+            harvest.read_feed("2026-10-09", getter=lambda url: (503, b""), sleep=self.slept.append)
+
+    def test_feed_adds_headings_newer_than_the_bulk_file(self):
+        self.fetch()
+        extra = RECORDS["sh85076432"].replace(b"sh85076432", b"sh2025000001").replace(b"sh 85076432", b"sh2025000001")
+        self.feed = [("sh2025000001", "2026-11-10"),         # not in the bulk file yet
+                     ("sh85148273", "2026-11-10"),           # changed after the bulk file was made
+                     ("sh85076432", "2025-08-04")]           # same day as the bulk file's date: nothing to do
+        self.assertEqual(self.dump(1000), 1004)
+        site = Site({"sh2025000001": (200, extra)})
+        self.assertEqual(self.fetch(site), 2)
+        self.assertEqual(sorted(site.calls), ["sh2025000001", "sh85148273"])
+        self.assertIn("sh2025000001", self.stored())
+        self.dump(1000)                                      # next week, same feed: already up to date
+        self.assertEqual(self.fetch(Site()), 0)
+
+    def test_feed_date_never_moves_a_heading_back(self):
+        self.feed = [("sh85148273", "2020-01-01")]
+        self.dump(1000)
+        self.assertEqual(self.c.execute("SELECT changed FROM census WHERE id='sh85148273'").fetchone()[0],
+                         "2025-08-04T00:00:00")
+
+    def test_heading_deleted_at_lc_leaves_the_release(self):
+        self.fetch()
+        out = os.path.join(self.data, "release")
+        harvest.build(self.c, out, date="20261107")
+        gone = re.sub(rb"(<(?:marcxml:)?leader[^>]*>.{5}).", rb"\g<1>d", RECORDS["sh85076432"])
+        self.assertTrue(harvest.deleted(gone))
+        self.assertFalse(harvest.deleted(RECORDS["sh85076432"]))
+        self.feed = [("sh85076432", "2026-11-10")]           # still in the bulk file, deleted since
+        self.dump(1000)
+        self.assertEqual(self.fetch(Site({"sh85076432": (200, gone)})), 1)
+        self.assertNotIn("sh85076432", self.stored())
+        self.assertTrue(harvest.build(self.c, out, date="20261114"))
+        with open(os.path.join(out, "deleted-20261114.csv"), encoding="utf-8") as fh:
+            self.assertEqual([r[0].replace(" ", "") for r in csv.reader(fh)][1:], ["sh85076432"])
+        self.dump(1000)                                      # and it is not fetched again next week
+        self.assertEqual(self.fetch(Site()), 0)
+
+
 def make_release(data, date):
     """Used by the load/publish tests: a complete store and release in `data`."""
     c = harvest.connect(data)
     rows = [(i, "2025-08-04T00:00:00") for i in IDS] + [(f"sh9{n:07d}", "2020") for n in range(1000)]
     write_dump(os.path.join(data, "subjects.madsrdf.jsonld.gz"), rows)
-    harvest.census(c, data, fetch_dump=None)
+    harvest.census(c, data, fetch_dump=None, feed=lambda since: [])
     harvest.fetch(c, data, getter=Site(), sleep=lambda s: None)
     harvest.build(c, os.path.join(data, "release"), date=date)
     c.close()
