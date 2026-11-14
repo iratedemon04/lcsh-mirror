@@ -155,6 +155,8 @@ def read_feed(since, getter=get_url, sleep=time.sleep):
         if status != 200:
             raise Stop(f"change feed page {page}: HTTP {status}")
         entries = [(i.decode(), d.decode()) for i, d in ENTRY.findall(body)]
+        if page == 1 and not entries:
+            raise Stop("change feed page 1 has no entries; LC may have changed its format")
         for id_, date in entries:
             if re.fullmatch(r"sh\d+", id_) and date >= since and date > found.get(id_, ""):
                 found[id_] = date
@@ -165,7 +167,8 @@ def read_feed(since, getter=get_url, sleep=time.sleep):
 
 def census(c, data, fetch_dump=download, feed=None):
     """Refresh the list of headings: LC's bulk file (downloaded at most once a week), plus
-    whatever LC's change feed says is newer than the bulk file."""
+    whatever LC's change feed says is newer than the bulk file. An empty file named
+    no-feed in the data directory switches the feed off (bulk file only, as before 2026-11-14)."""
     path = os.path.join(data, "subjects.madsrdf.jsonld.gz")
     if not os.path.exists(path) or time.time() - os.path.getmtime(path) > 6 * 86400:
         fetch_dump(DUMP, path)
@@ -177,7 +180,7 @@ def census(c, data, fetch_dump=download, feed=None):
     c.executemany("INSERT OR REPLACE INTO census VALUES(?,?)", rows)
     c.execute("COMMIT")
     newest = max(d for _, d in rows)[:10]
-    if re.fullmatch(r"\d{4}-\d\d-\d\d", newest):
+    if re.fullmatch(r"\d{4}-\d\d-\d\d", newest) and not os.path.exists(os.path.join(data, "no-feed")):
         since = (dt.date.fromisoformat(newest) - dt.timedelta(days=FEED_OVERLAP)).isoformat()
         # a feed date only counts when it is a later day than the bulk file's date for that heading
         c.executemany("INSERT INTO census VALUES(?,?) ON CONFLICT(id) DO UPDATE SET changed=excluded.changed "

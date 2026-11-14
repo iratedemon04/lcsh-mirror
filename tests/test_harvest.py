@@ -293,6 +293,16 @@ class FeedTests(Base):
         with self.assertRaises(harvest.Stop):
             harvest.read_feed("2026-10-09", getter=lambda url: (503, b""), sleep=self.slept.append)
 
+    def test_an_empty_first_page_stops_the_run(self):
+        with self.assertRaises(harvest.Stop):
+            harvest.read_feed("2026-10-09", getter=lambda url: (200, b"<feed></feed>"), sleep=self.slept.append)
+
+    def test_no_feed_file_switches_the_feed_off(self):
+        open(os.path.join(self.data, "no-feed"), "w").close()
+        self.feed = [("sh2025000001", "2026-11-10")]
+        self.dump(1000)
+        self.assertIsNone(self.c.execute("SELECT 1 FROM census WHERE id='sh2025000001'").fetchone())
+
     def test_feed_adds_headings_newer_than_the_bulk_file(self):
         self.fetch()
         extra = RECORDS["sh85076432"].replace(b"sh85076432", b"sh2025000001").replace(b"sh 85076432", b"sh2025000001")
